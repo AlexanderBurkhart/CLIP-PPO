@@ -13,8 +13,13 @@ import torch.optim as optim
 import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
+import clip
 
 from minigrid.wrappers import ImgObsWrapper
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import utils
 
 
 @dataclass
@@ -39,7 +44,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = 'MiniGrid-Empty-16x16-v0'
     """the id of the environment"""
-    total_timesteps: int = 10_000
+    total_timesteps: int = 500_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -71,6 +76,20 @@ class Args:
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
+    
+    # CLIP-PPO specific arguments
+    clip_lambda: float = 0.1
+    """coefficient for CLIP alignment loss"""
+    clip_model: str = "ViT-B/32"
+    """CLIP model variant to use"""
+    
+    # Model saving arguments
+    save_model: bool = True
+    """whether to save model checkpoints"""
+    save_freq: int = 100000
+    """save model every N timesteps"""
+    model_path: str = "checkpoints"
+    """directory to save model checkpoints"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -91,7 +110,7 @@ def make_env(env_id, idx, capture_video, run_name):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ResizeObservation(env, (84, 84))  # keep CleanRL CNN output = 7x7
         if capture_video and idx == 0:
-            env = gym.wrappers.RecordVideo(env, f"videos/minigrid/ppo/{run_name}")
+            env = gym.wrappers.RecordVideo(env, f"videos/minigrid/clip_ppo/{run_name}")
 
         return env
     return thunk
@@ -101,6 +120,86 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
+
+
+def compute_infonce_loss(z, c, logit_scale):
+    """
+    Compute InfoNCE loss between PPO latent representations (z) and CLIP text embeddings (c).
+    
+    Args:
+        z: PPO latent vectors [batch_size, latent_dim]
+        c: CLIP text embeddings [batch_size, clip_dim]
+        logit_scale: CLIP logit scale parameter
+    
+    Returns:
+        InfoNCE loss scalar
+    """
+    # L2 Normalize
+    z = torch.nn.functional.normalize(z, dim=-1)
+    c = torch.nn.functional.normalize(c, dim=-1)
+
+    # Compute pairwise similarity scores
+    logit_scale = torch.clamp(logit_scale.exp(), max=100)
+    logits_z2c = logit_scale * (z @ c.T)
+    logits_c2z = logit_scale * (c @ z.T)
+    targets = torch.arange(z.size(0), device=z.device)
+
+    # Cross entropy
+    loss_z = torch.nn.functional.cross_entropy(logits_z2c, targets)
+    loss_c = torch.nn.functional.cross_entropy(logits_c2z, targets)
+    L_clip = 0.5 * (loss_z + loss_c)
+    
+    return L_clip
+
+
+
+def get_symbolic_descriptions(envs):
+    """
+    Extract symbolic descriptions from MiniGrid environments' internal state.
+    
+    Args:
+        envs: Vectorized environment
+    
+    Returns:
+        List of text descriptions for each environment
+    """
+    descriptions = []
+    
+    for i in range(envs.num_envs):
+        try:
+            # Access the unwrapped environment to get MiniGrid state
+            env = envs.envs[i].env
+            # Navigate through wrappers to get to the base MiniGrid environment
+            while hasattr(env, 'env'):
+                env = env.env
+            
+            # Extract agent position and direction
+            agent_pos = env.agent_pos
+            agent_dir = env.agent_dir
+            dir_names = ["right", "down", "left", "up"]
+            dir_name = dir_names[agent_dir]
+            
+            # Extract objects in the environment
+            objects = []
+            grid = env.grid
+            for x in range(grid.width):
+                for y in range(grid.height):
+                    cell = grid.get(x, y)
+                    if cell is not None and cell.type != 'wall':
+                        objects.append(f"{cell.type} at ({x},{y})")
+            
+            # Build description
+            desc = f"agent at ({agent_pos[0]},{agent_pos[1]}) facing {dir_name}"
+            if objects:
+                desc += f", objects: {', '.join(objects[:3])}"  # Limit to first 3 objects
+            
+            descriptions.append(desc)
+            
+        except Exception as e:
+            # Fallback description if state extraction fails
+            descriptions.append("agent navigating grid environment")
+    
+    return descriptions
 
 
 class Agent(nn.Module):
@@ -138,6 +237,10 @@ class Agent(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
+    
+    def get_latent_representation(self, x):
+        x = self._pre(x)
+        return self.network(x)
 
 
 if __name__ == "__main__":
@@ -180,6 +283,15 @@ if __name__ == "__main__":
 
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    
+    # Load CLIP model
+    clip_model, clip_preprocess = clip.load(args.clip_model, device=device)
+    clip_model.eval()  # Keep CLIP frozen
+    
+    # Create checkpoint directory
+    if args.save_model:
+        os.makedirs(args.model_path, exist_ok=True)
+        checkpoint_path = os.path.join(args.model_path, run_name)
 
     # ALGO Logic: Storage setup
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
@@ -296,7 +408,30 @@ if __name__ == "__main__":
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                
+                # CLIP alignment loss
+                clip_loss = 0.0
+                if args.clip_lambda > 0.0:
+                    # Get PPO latent representations
+                    with torch.no_grad():
+                        # Get symbolic descriptions for current minibatch
+                        # Note: We need to map minibatch indices back to environment states
+                        # For simplicity, we'll generate descriptions based on current env state
+                        descriptions = get_symbolic_descriptions(envs)
+                        # Repeat descriptions to match minibatch size
+                        mb_descriptions = [descriptions[i % len(descriptions)] for i in range(len(mb_inds))]
+                        
+                        # Generate CLIP text embeddings
+                        text_tokens = clip.tokenize(mb_descriptions).to(device)
+                        clip_text_embeddings = clip_model.encode_text(text_tokens).float()
+                    
+                    # Get PPO latent representations for minibatch
+                    ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
+                    
+                    # Compute InfoNCE loss
+                    clip_loss = compute_infonce_loss(ppo_latents, clip_text_embeddings, clip_model.logit_scale)
+                
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.clip_lambda * clip_loss
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -319,8 +454,19 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
+        if args.clip_lambda > 0.0:
+            writer.add_scalar("losses/clip_loss", clip_loss.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        
+        # Save model checkpoint
+        if args.save_model and global_step % args.save_freq == 0:
+            utils.save_checkpoint(agent, optimizer, iteration, global_step, args, checkpoint_path, b_returns)
+
+    # Save final model
+    if args.save_model:
+        utils.save_checkpoint(agent, optimizer, args.num_iterations, global_step, args, checkpoint_path, 
+                       b_returns if 'b_returns' in locals() else None, final=True)
 
     envs.close()
     writer.close()

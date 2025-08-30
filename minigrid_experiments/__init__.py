@@ -1,0 +1,1 @@
+# MiniGrid experiments package
