@@ -1,0 +1,6 @@
+# Ignore venv
+.venv/*
+
+# Ignore all test output
+videos/*
+runs/*
