@@ -43,9 +43,9 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
  
     # Algorithm specific arguments
-    env_id: str = 'MiniGrid-Empty-16x16-v0'
+    env_id: str = 'MiniGrid-DoorKey-6x6-v0'
     """the id of the environment"""
-    total_timesteps: int = 250_000
+    total_timesteps: int = 1_500_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -79,7 +79,7 @@ class Args:
     """the target KL divergence threshold"""
     
     # CLIP-PPO specific arguments
-    clip_lambda: float = 0.00001
+    clip_lambda: float = 0#.00001
     """coefficient for CLIP alignment loss"""
     clip_model: str = "ViT-B/32"
     """CLIP model variant to use"""
@@ -95,11 +95,13 @@ class Args:
     """save model every N timesteps"""
     model_path: str = "checkpoints"
     """directory to save model checkpoints"""
+    resume_checkpoint: str = 'checkpoints/doorkey_ppo_hard.pt'
+    """path to checkpoint file to resume training from"""
     
     # Visual disturbance arguments
     apply_disturbances: bool = True
     """whether to apply visual disturbances during training"""
-    disturbance_severity: str = "SEVERE"
+    disturbance_severity: str = "HARD"
     """disturbance severity level: MILD, MODERATE, HARD, SEVERE"""
 
     # to be filled in runtime
@@ -349,14 +351,22 @@ if __name__ == "__main__":
     # Storage for text descriptions (collected during rollout)
     text_descriptions = [["" for _ in range(args.num_envs)] for _ in range(args.num_steps)]
 
-    # TRY NOT TO MODIFY: start the game
+    # Load checkpoint if specified
+    start_iteration = 1
     global_step = 0
+    if args.resume_checkpoint:
+        start_iteration, global_step = utils.load_checkpoint(
+            args.resume_checkpoint, agent, optimizer, device
+        )
+        start_iteration += 1  # Start from next iteration
+
+    # TRY NOT TO MODIFY: start the game
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
-    for iteration in tqdm.tqdm(range(1, args.num_iterations + 1)):
+    for iteration in tqdm.tqdm(range(start_iteration, args.num_iterations + 1)):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations

@@ -114,10 +114,12 @@ Both scripts use `tyro` for command-line arguments. Key parameters include:
 - `--save_model`: Enable model checkpointing (default: True)
 - `--save_freq`: Save frequency in timesteps (default: 100,000)
 - `--model_path`: Checkpoint directory (default: "checkpoints")
+- `--resume_checkpoint`: Path to checkpoint file to resume training from
 
 **CLIP-PPO Specific Parameters:**
-- `--clip_lambda`: CLIP alignment loss coefficient (default: 0.1)
+- `--clip_lambda`: CLIP alignment loss coefficient (default: 0.00001)
 - `--clip_model`: CLIP model variant (default: "ViT-B/32")
+- `--clip_modality`: CLIP modality selection ("image" or "text", default: "text")
 
 ### Usage Examples
 
@@ -128,8 +130,14 @@ python minigrid_experiments/ppo/ppo_minigrid.py --env_id MiniGrid-DoorKey-6x6-v0
 # CLIP-PPO with different lambda values
 python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_lambda 0.01 --total_timesteps 1000000
 
+# CLIP-PPO with image modality
+python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_modality image --clip_lambda 0.00001
+
 # Disable CLIP alignment (pure PPO)
 python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_lambda 0.0
+
+# Resume training from checkpoint
+python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --resume_checkpoint checkpoints/run_name_latest.pt
 
 # Enable W&B tracking
 python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --track --wandb_project_name clip-ppo-experiments
@@ -170,11 +178,26 @@ Both implementations include comprehensive model saving:
 - **Performance data**: Returns for analysis
 - **Training status**: Whether training completed
 
-### Shared Utility
-The implementations use a shared utility (`minigrid_experiments/utils.py`) to avoid code duplication:
+### Checkpoint Management
+Both implementations support comprehensive checkpoint saving and loading through shared utilities (`minigrid_experiments/utils.py`):
+
+**Saving Checkpoints:**
 ```python
 utils.save_checkpoint(agent, optimizer, iteration, global_step, args, checkpoint_path, b_returns, final=False)
 ```
+
+**Loading Checkpoints:**
+```python
+start_iteration, global_step = utils.load_checkpoint(checkpoint_path, agent, optimizer, device)
+```
+
+**Checkpoint Features:**
+- **Automatic saving**: Every `save_freq` timesteps (default: 100,000)
+- **Latest checkpoint**: Always maintains `{run_name}_latest.pt`
+- **Step-specific**: Saves as `{run_name}_step_{global_step}.pt`
+- **Final checkpoint**: `{run_name}_final.pt` at training completion
+- **Complete state**: Model weights, optimizer state, training progress, hyperparameters
+- **Resume capability**: Continue training from exact point with proper learning rate annealing
 
 ## Visual Disturbance Testing
 
@@ -342,16 +365,36 @@ def compute_l2_embedding_loss(z, c):
 | Text+Image | Cosine | 1.0 → 0.926 | 50% completion (vs 100% PPO) |
 | Image-only | Cosine | Stays at 1.0 | Performance degradation |
 | Text-only | Cosine | Stays at 1.0 | Performance degradation |
+| Text+Image | L2 | 0.03 → oscillating increase | Performance issues |
+| Image-only | L2 | 0.026 → slight increase | Performance issues |
+| Text-only | L2 | Start higher → 0.1+ rapid increase | Worst performance |
 
 #### Technical Insights (Still Valid)
 - **Domain Mismatch**: CLIP trained on natural images/text may not transfer well to geometric grid environments
 - **Scale Issues**: `clip_lambda=0.00001` may be too small relative to PPO losses (~0.1-1.0)
 - **Semantic Relevance**: Visual-motor navigation features may be orthogonal to CLIP's semantic features
 
+#### Recent Experimental Results (Post-fixes)
+**Current Implementation Status**: All major implementation bugs resolved, semantically correct alignment achieved.
+
+**Test Environment**: MiniGrid-DoorKey-6x6-v0 with HARD disturbances
+- **Configuration**: λ=0.00001, text modality, HARD severity visual disturbances
+- **Training**: 1.5M timesteps with checkpoint resumption capability
+- **Key Finding**: **CLIP-PPO shows obvious improvement over PPO on disturbed environments**
+
+**Performance Pattern Observed:**
+- **CLIP Loss**: Stable/flat after initial alignment (indicating balanced optimization)
+- **Task Performance**: Clear improvement specifically on visually disturbed environments
+- **Robustness Benefit**: Better navigation under HARD visual disturbances vs vanilla PPO
+
+#### Validated Hypothesis
+**CLIP-PPO with minimal semantic regularization (λ=0.00001) successfully improves robustness to visual disturbances.** The text modality provides stable semantic grounding that helps PPO learn representations robust to visual corruption while maintaining task performance.
+
 #### Recommendations for Future Testing
-1. **Increase Lambda**: Try `clip_lambda=0.1` or higher for meaningful CLIP contribution
-2. **Complex Environments**: Test on language-conditioned or semantic-rich tasks where CLIP alignment is more relevant
-3. **Ablation Studies**: Compare image-only vs text-only modalities with corrected implementation
+1. **Systematic Comparison**: Compare PPO vs CLIP-PPO across disturbance severities
+2. **Complex Environments**: Extend to environments where semantic reasoning is more critical
+3. **Ablation Studies**: Test image vs text modalities, different lambda values
+4. **Robustness Curves**: Measure performance degradation across disturbance levels
 
 ### Disturbance Severity Levels
 

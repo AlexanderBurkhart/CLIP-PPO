@@ -37,3 +37,31 @@ def save_checkpoint(
         torch.save(checkpoint, f"{checkpoint_path}_latest.pt")
     
     torch.save(checkpoint, filename)
+
+
+def load_checkpoint(
+    checkpoint_path: str,
+    agent: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device
+) -> tuple:
+    """Load model checkpoint and return iteration, global_step"""
+    print(f"Loading checkpoint from {checkpoint_path}")
+    
+    # Load with weights_only=False to handle numpy arrays in checkpoint
+    # This is safe since we trust our own checkpoint files
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    
+    # Load model and optimizer states
+    agent.load_state_dict(checkpoint['agent_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    iteration = checkpoint['iteration']
+    global_step = checkpoint['global_step']
+    training_complete = checkpoint.get('training_complete', False)
+    
+    print(f"Checkpoint loaded: iteration {iteration}, global_step {global_step}")
+    if training_complete:
+        print("Warning: This was a final checkpoint - training was marked as complete")
+    
+    return iteration, global_step
