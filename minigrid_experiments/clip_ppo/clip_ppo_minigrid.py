@@ -83,6 +83,8 @@ class Args:
     """coefficient for CLIP alignment loss"""
     clip_model: str = "ViT-B/32"
     """CLIP model variant to use"""
+    clip_modality: str = "text"
+    """CLIP modality to use for alignment: 'image' or 'text'"""
     verbose: bool = True
     """enable verbose debug output for CLIP-PPO losses"""
     
@@ -95,9 +97,9 @@ class Args:
     """directory to save model checkpoints"""
     
     # Visual disturbance arguments
-    apply_disturbances: bool = False
+    apply_disturbances: bool = True
     """whether to apply visual disturbances during training"""
-    disturbance_severity: str = "HARD"
+    disturbance_severity: str = "SEVERE"
     """disturbance severity level: MILD, MODERATE, HARD, SEVERE"""
 
     # to be filled in runtime
@@ -163,11 +165,10 @@ def compute_cosine_embedding_loss(z, c):
     Returns:
         Cosine embedding loss scalar
     """
-    # Handle dimensional mismatch by projecting to the smaller dimension
+    # Check for dimensional mismatch - should not happen with current architecture
     if z.shape[-1] != c.shape[-1]:
-        min_dim = min(z.shape[-1], c.shape[-1])
-        z = z[:, :min_dim]
-        c = c[:, :min_dim]
+        raise ValueError(f"Dimension mismatch: PPO latents ({z.shape[-1]}) vs CLIP embeddings ({c.shape[-1]}). "
+                        f"Both should be 512-dim for ViT-B/32. Check agent architecture.")
     
     # L2 Normalize: z/||z|| and c_text/||c_text||
     z_norm = torch.nn.functional.normalize(z, dim=-1)
@@ -227,6 +228,7 @@ def get_symbolic_descriptions(envs):
             
         except Exception as e:
             # Fallback description if state extraction fails
+            print(f"Warning: Failed to extract symbolic description for env {i}: {e}")
             descriptions.append("agent navigating grid environment")
     
     return descriptions
@@ -318,6 +320,10 @@ if __name__ == "__main__":
     clip_model, clip_preprocess = clip.load(args.clip_model, device=device)
     clip_model.eval()  # Keep CLIP frozen
     
+    # Pre-create CLIP normalization tensors (avoid recreation every iteration)
+    clip_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to(device).view(1, 3, 1, 1)
+    clip_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).to(device).view(1, 3, 1, 1)
+    
     # Initialize disturbance wrapper if enabled
     disturber = None
     if args.apply_disturbances:
@@ -339,6 +345,9 @@ if __name__ == "__main__":
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    
+    # Storage for text descriptions (collected during rollout)
+    text_descriptions = [["" for _ in range(args.num_envs)] for _ in range(args.num_steps)]
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
@@ -356,8 +365,23 @@ if __name__ == "__main__":
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
+            
+            # Apply visual disturbances to next_obs if enabled (following CleanRL pattern)
+            if disturber:
+                # Convert entire batch to numpy once, apply disturbances, convert back
+                next_obs_np = next_obs.cpu().numpy()
+                for env_idx in range(args.num_envs):
+                    next_obs_np[env_idx] = disturber.apply_disturbances(next_obs_np[env_idx])
+                next_obs = torch.from_numpy(next_obs_np).to(device)
+            
             obs[step] = next_obs
             dones[step] = next_done
+            
+            # Collect text descriptions BEFORE environment step (to match next_obs state)
+            if args.clip_lambda > 0.0 and args.clip_modality == 'text':
+                step_descriptions = get_symbolic_descriptions(envs)
+                for env_idx in range(args.num_envs):
+                    text_descriptions[step][env_idx] = step_descriptions[env_idx]
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
@@ -370,12 +394,6 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            
-            # Apply visual disturbances if enabled
-            if disturber:
-                # Apply disturbances to each environment observation
-                for env_idx in range(args.num_envs):
-                    next_obs[env_idx] = disturber.apply_disturbances(next_obs[env_idx])
                     
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
@@ -409,6 +427,40 @@ if __name__ == "__main__":
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
+        
+        # Pre-compute CLIP embeddings once per iteration (before minibatch loop)
+        if args.clip_lambda > 0.0:
+            with torch.no_grad():
+                # Use both CLIP image and text encoders
+                import torch.nn.functional as F
+                clip_images = F.interpolate(
+                    b_obs.permute(0, 3, 1, 2).float() / 255.0,  # [B, C, H, W], convert to [0,1]
+                    size=(224, 224), 
+                    mode='bilinear', 
+                    align_corners=False
+                )
+                
+                # Apply ImageNet normalization using pre-created tensors
+                clip_images = (clip_images - clip_mean) / clip_std
+                
+                # Generate CLIP embeddings based on selected modality
+                if args.clip_modality == "image":
+                    # Use only CLIP image embeddings
+                    clip_image_embeddings = clip_model.encode_image(clip_images)
+                    clip_embeddings = torch.nn.functional.normalize(clip_image_embeddings, dim=-1)
+                    
+                elif args.clip_modality == "text":
+                    # Use only CLIP text embeddings
+                    # Flatten text_descriptions to match b_obs structure
+                    batch_descriptions = [text_descriptions[step][env_idx] 
+                                        for step in range(args.num_steps) 
+                                        for env_idx in range(args.num_envs)]
+                    text_tokens = clip.tokenize(batch_descriptions).to(device)
+                    clip_text_embeddings = clip_model.encode_text(text_tokens)
+                    clip_embeddings = torch.nn.functional.normalize(clip_text_embeddings, dim=-1)
+                    
+                else:
+                    raise ValueError(f"Invalid clip_modality: {args.clip_modality}. Must be 'image' or 'text'")
 
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
@@ -458,47 +510,14 @@ if __name__ == "__main__":
                 # CLIP alignment loss
                 clip_loss = 0.0
                 if args.clip_lambda > 0.0:
-                    # Get PPO latent representations
-                    with torch.no_grad():
-                        # Use both CLIP image and text encoders
-                        mb_obs = b_obs[mb_inds]  # [batch_size, H, W, C]
-                        
-                        # Resize to 224x224 for CLIP (CLIP expects this input size)
-                        import torch.nn.functional as F
-                        clip_images = F.interpolate(
-                            mb_obs.permute(0, 3, 1, 2).float() / 255.0,  # [B, C, H, W], convert to [0,1]
-                            size=(224, 224), 
-                            mode='bilinear', 
-                            align_corners=False
-                        )
-                        
-                        # Apply ImageNet normalization - CLIP was trained with these specific mean/std values
-                        # from millions of internet images. Without this normalization, CLIP's internal
-                        # activations will be in wrong ranges and produce poor quality features
-                        clip_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to(device).view(1, 3, 1, 1)
-                        clip_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).to(device).view(1, 3, 1, 1)
-                        clip_images = (clip_images - clip_mean) / clip_std
-                        
-                        # Generate CLIP image embeddings and normalize
-                        clip_image_embeddings = clip_model.encode_image(clip_images).float()
-                        clip_image_embeddings = torch.nn.functional.normalize(clip_image_embeddings, dim=-1)
-                        
-                        # Generate text descriptions and embeddings
-                        descriptions = get_symbolic_descriptions(envs)
-                        mb_descriptions = [descriptions[i % len(descriptions)] for i in range(len(mb_inds))]
-                        text_tokens = clip.tokenize(mb_descriptions).to(device)
-                        clip_text_embeddings = clip_model.encode_text(text_tokens).float()
-                        clip_text_embeddings = torch.nn.functional.normalize(clip_text_embeddings, dim=-1)
-                        
-                        # Combine normalized embeddings by averaging (keeps unit norm)
-                        clip_combined_embeddings = 0.5 * clip_image_embeddings + 0.5 * clip_text_embeddings
-                        clip_combined_embeddings = torch.nn.functional.normalize(clip_combined_embeddings, dim=-1)
-                    
-                    # Get PPO latent representations for minibatch
+                    # Get PPO latent representations for minibatch (WITH gradients enabled)
                     ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
                     
-                    # Compute L2 embedding loss using combined embeddings
-                    clip_loss = compute_l2_embedding_loss(ppo_latents, clip_combined_embeddings)
+                    # Use pre-computed CLIP embeddings for this minibatch
+                    mb_clip_embeddings = clip_embeddings[mb_inds]
+                    
+                    # Compute loss
+                    clip_loss = compute_cosine_embedding_loss(ppo_latents, mb_clip_embeddings)
                     
                     # Debug: Print key metrics for first epoch if verbose enabled
                     if args.verbose and start == 0 and epoch == 0:
