@@ -95,7 +95,7 @@ class Args:
     """directory to save model checkpoints"""
     
     # Visual disturbance arguments
-    apply_disturbances: bool = True
+    apply_disturbances: bool = False
     """whether to apply visual disturbances during training"""
     disturbance_severity: str = "HARD"
     """disturbance severity level: MILD, MODERATE, HARD, SEVERE"""
