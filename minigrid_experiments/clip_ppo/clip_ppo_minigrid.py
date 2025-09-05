@@ -20,6 +20,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
+from disturbances import DisturbanceWrapper, DisturbanceSeverity
 
 
 @dataclass
@@ -78,10 +79,12 @@ class Args:
     """the target KL divergence threshold"""
     
     # CLIP-PPO specific arguments
-    clip_lambda: float = 0.1
+    clip_lambda: float = 0.00001
     """coefficient for CLIP alignment loss"""
     clip_model: str = "ViT-B/32"
     """CLIP model variant to use"""
+    verbose: bool = True
+    """enable verbose debug output for CLIP-PPO losses"""
     
     # Model saving arguments
     save_model: bool = True
@@ -90,6 +93,12 @@ class Args:
     """save model every N timesteps"""
     model_path: str = "checkpoints"
     """directory to save model checkpoints"""
+    
+    # Visual disturbance arguments
+    apply_disturbances: bool = True
+    """whether to apply visual disturbances during training"""
+    disturbance_severity: str = "HARD"
+    """disturbance severity level: MILD, MODERATE, HARD, SEVERE"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -122,34 +131,55 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-def compute_infonce_loss(z, c, logit_scale):
+def compute_l2_embedding_loss(z, c):
     """
-    Compute InfoNCE loss between PPO latent representations (z) and CLIP text embeddings (c).
+    Compute L2 embedding loss between PPO latent representations (z) and CLIP embeddings (c).
+    
+    Formula: L_CLIP = ||z - c||^2
+    
+    Args:
+        z: PPO latent vectors [batch_size, latent_dim]
+        c: CLIP embeddings [batch_size, clip_dim]
+    
+    Returns:
+        L2 embedding loss scalar
+    """
+    # Compute L2 distance: ||z - c||^2
+    loss = torch.mean((z - c) ** 2)
+    
+    return loss
+
+
+def compute_cosine_embedding_loss(z, c):
+    """
+    Compute cosine embedding loss between PPO latent representations (z) and CLIP text embeddings (c).
+    
+    Formula: L_CLIP = 1 - cos(z/||z||, c_text/||c_text||)
     
     Args:
         z: PPO latent vectors [batch_size, latent_dim]
         c: CLIP text embeddings [batch_size, clip_dim]
-        logit_scale: CLIP logit scale parameter
     
     Returns:
-        InfoNCE loss scalar
+        Cosine embedding loss scalar
     """
-    # L2 Normalize
-    z = torch.nn.functional.normalize(z, dim=-1)
-    c = torch.nn.functional.normalize(c, dim=-1)
-
-    # Compute pairwise similarity scores
-    logit_scale = torch.clamp(logit_scale.exp(), max=100)
-    logits_z2c = logit_scale * (z @ c.T)
-    logits_c2z = logit_scale * (c @ z.T)
-    targets = torch.arange(z.size(0), device=z.device)
-
-    # Cross entropy
-    loss_z = torch.nn.functional.cross_entropy(logits_z2c, targets)
-    loss_c = torch.nn.functional.cross_entropy(logits_c2z, targets)
-    L_clip = 0.5 * (loss_z + loss_c)
+    # Handle dimensional mismatch by projecting to the smaller dimension
+    if z.shape[-1] != c.shape[-1]:
+        min_dim = min(z.shape[-1], c.shape[-1])
+        z = z[:, :min_dim]
+        c = c[:, :min_dim]
     
-    return L_clip
+    # L2 Normalize: z/||z|| and c_text/||c_text||
+    z_norm = torch.nn.functional.normalize(z, dim=-1)
+    c_norm = torch.nn.functional.normalize(c, dim=-1)
+    
+    # Compute cosine similarity: cos(z/||z||, c_text/||c_text||)
+    cosine_sim = torch.sum(z_norm * c_norm, dim=-1)  # [batch_size]
+    
+    # L_CLIP = 1 - cos(z/||z||, c_text/||c_text||)
+    loss = torch.mean(1 - cosine_sim)
+    
+    return loss
 
 
 
@@ -288,6 +318,15 @@ if __name__ == "__main__":
     clip_model, clip_preprocess = clip.load(args.clip_model, device=device)
     clip_model.eval()  # Keep CLIP frozen
     
+    # Initialize disturbance wrapper if enabled
+    disturber = None
+    if args.apply_disturbances:
+        severity = getattr(DisturbanceSeverity, args.disturbance_severity)
+        disturber = DisturbanceWrapper(seed=args.seed, severity=severity)
+        print(f"Disturbances enabled with severity: {args.disturbance_severity}")
+    else:
+        print("Disturbances disabled")
+    
     # Create checkpoint directory
     if args.save_model:
         os.makedirs(args.model_path, exist_ok=True)
@@ -331,6 +370,13 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
+            
+            # Apply visual disturbances if enabled
+            if disturber:
+                # Apply disturbances to each environment observation
+                for env_idx in range(args.num_envs):
+                    next_obs[env_idx] = disturber.apply_disturbances(next_obs[env_idx])
+                    
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
             if "final_info" in infos:
@@ -414,22 +460,53 @@ if __name__ == "__main__":
                 if args.clip_lambda > 0.0:
                     # Get PPO latent representations
                     with torch.no_grad():
-                        # Get symbolic descriptions for current minibatch
-                        # Note: We need to map minibatch indices back to environment states
-                        # For simplicity, we'll generate descriptions based on current env state
-                        descriptions = get_symbolic_descriptions(envs)
-                        # Repeat descriptions to match minibatch size
-                        mb_descriptions = [descriptions[i % len(descriptions)] for i in range(len(mb_inds))]
+                        # Use both CLIP image and text encoders
+                        mb_obs = b_obs[mb_inds]  # [batch_size, H, W, C]
                         
-                        # Generate CLIP text embeddings
+                        # Resize to 224x224 for CLIP (CLIP expects this input size)
+                        import torch.nn.functional as F
+                        clip_images = F.interpolate(
+                            mb_obs.permute(0, 3, 1, 2).float() / 255.0,  # [B, C, H, W], convert to [0,1]
+                            size=(224, 224), 
+                            mode='bilinear', 
+                            align_corners=False
+                        )
+                        
+                        # Apply ImageNet normalization - CLIP was trained with these specific mean/std values
+                        # from millions of internet images. Without this normalization, CLIP's internal
+                        # activations will be in wrong ranges and produce poor quality features
+                        clip_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to(device).view(1, 3, 1, 1)
+                        clip_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).to(device).view(1, 3, 1, 1)
+                        clip_images = (clip_images - clip_mean) / clip_std
+                        
+                        # Generate CLIP image embeddings and normalize
+                        clip_image_embeddings = clip_model.encode_image(clip_images).float()
+                        clip_image_embeddings = torch.nn.functional.normalize(clip_image_embeddings, dim=-1)
+                        
+                        # Generate text descriptions and embeddings
+                        descriptions = get_symbolic_descriptions(envs)
+                        mb_descriptions = [descriptions[i % len(descriptions)] for i in range(len(mb_inds))]
                         text_tokens = clip.tokenize(mb_descriptions).to(device)
                         clip_text_embeddings = clip_model.encode_text(text_tokens).float()
+                        clip_text_embeddings = torch.nn.functional.normalize(clip_text_embeddings, dim=-1)
+                        
+                        # Combine normalized embeddings by averaging (keeps unit norm)
+                        clip_combined_embeddings = 0.5 * clip_image_embeddings + 0.5 * clip_text_embeddings
+                        clip_combined_embeddings = torch.nn.functional.normalize(clip_combined_embeddings, dim=-1)
                     
                     # Get PPO latent representations for minibatch
                     ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
                     
-                    # Compute InfoNCE loss
-                    clip_loss = compute_infonce_loss(ppo_latents, clip_text_embeddings, clip_model.logit_scale)
+                    # Compute L2 embedding loss using combined embeddings
+                    clip_loss = compute_l2_embedding_loss(ppo_latents, clip_combined_embeddings)
+                    
+                    # Debug: Print key metrics for first epoch if verbose enabled
+                    if args.verbose and start == 0 and epoch == 0:
+                        print(f"Iter {iteration}")
+                        print(f"Weighted CLIP loss: {args.clip_lambda * clip_loss.item():>15.10f}")
+                        print(f"PPO loss:           {pg_loss.item():>15.10f}")
+                        print(f"Combined loss: {(pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.clip_lambda * clip_loss).item():.6f}")
+                        print("---")
                 
                 loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.clip_lambda * clip_loss
 

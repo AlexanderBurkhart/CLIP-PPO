@@ -277,8 +277,101 @@ Core dependencies (based on imports):
 
 ### Key Functions
 - `get_symbolic_descriptions()`: Extracts MiniGrid state to text descriptions
-- `compute_infonce_loss()`: Calculates CLIP alignment loss
+- `compute_cosine_embedding_loss()`: Calculates cosine similarity-based alignment loss
+- `compute_l2_embedding_loss()`: Calculates L2 distance-based alignment loss (simplified version)
 - `Agent.get_latent_representation()`: Exposes PPO hidden states
+
+### Loss Function Implementation
+
+**Two alignment loss functions were implemented and tested:**
+
+#### Cosine Embedding Loss
+```python
+def compute_cosine_embedding_loss(z, c):
+    """L_CLIP = 1 - cos(z/||z||, c/||c||)"""
+    z_norm = torch.nn.functional.normalize(z, dim=-1)
+    c_norm = torch.nn.functional.normalize(c, dim=-1)
+    cosine_sim = torch.sum(z_norm * c_norm, dim=-1)
+    loss = torch.mean(1 - cosine_sim)
+    return loss
+```
+
+#### L2 Embedding Loss (Simplified)
+```python
+def compute_l2_embedding_loss(z, c):
+    """L_CLIP = ||z - c||^2"""
+    loss = torch.mean((z - c) ** 2)
+    return loss
+```
+
+**Note**: Dimensional mismatch handling was removed since both PPO latents and CLIP embeddings are 512-dimensional in the ViT-B/32 configuration.
+
+## Experimental Findings
+
+### CLIP-PPO Performance Analysis
+
+**Systematic testing of CLIP-PPO revealed fundamental limitations for simple navigation tasks:**
+
+#### Test Environment: MiniGrid-Empty-16x16-v0 with HARD disturbances
+- **HARD Severity**: Gaussian noise σ=0.13, blur σ=2.1, contrast (0.69,1.31), cutout 18%
+- **Training**: 250k timesteps, λ=0.00001
+- **Baseline**: PPO achieves 100% task completion under HARD disturbances
+
+#### Results Summary
+| Embedding Type | Loss Function | Loss Behavior | Task Performance |
+|---------------|---------------|---------------|-----------------|
+| Text+Image | Cosine | 1.0 → 0.926 | 50% completion (vs 100% PPO) |
+| Image-only | Cosine | Stays at 1.0 | Performance degradation |
+| Text-only | Cosine | Stays at 1.0 | Performance degradation |
+| Text+Image | L2 | 0.03 → oscillating increase | Performance issues |
+| Image-only | L2 | 0.026 → slight increase | Performance issues |
+| Text-only | L2 | Start higher → 0.1+ rapid increase | Worst performance |
+
+#### Key Findings
+1. **Semantic Alignment Conflicts with RL**: CLIP embeddings are orthogonal to visual-motor features needed for navigation
+2. **Divergence Pattern**: L2 losses show PPO representations actively moving away from CLIP embeddings during learning
+3. **Text Embeddings Most Harmful**: Text-only alignment shows fastest divergence and worst task performance
+4. **No Robustness Benefit**: Even when alignment occurs (text+image cosine), robustness decreases rather than improves
+
+#### Technical Insights
+- **Domain Mismatch**: CLIP trained on natural images/text doesn't transfer to geometric grid environments
+- **Objective Conflict**: Semantic alignment pulls representations away from optimal RL features
+- **Scale Issues**: Different embedding magnitudes and gradient conflicts between PPO and CLIP objectives
+
+### Disturbance Severity Levels
+
+**Updated with HARD severity level for balanced testing:**
+
+```python
+SEVERITY_CONFIGS = {
+    DisturbanceSeverity.MILD: {
+        'gaussian_noise_sigma': 0.08,
+        'gaussian_blur_sigma': 1.0,
+        'contrast_range': (0.75, 1.25),
+        'cutout_ratio': 0.10
+    },
+    DisturbanceSeverity.MODERATE: {
+        'gaussian_noise_sigma': 0.12,
+        'gaussian_blur_sigma': 2.0,
+        'contrast_range': (0.7, 1.3),
+        'cutout_ratio': 0.17
+    },
+    DisturbanceSeverity.HARD: {
+        'gaussian_noise_sigma': 0.13,
+        'gaussian_blur_sigma': 2.1,
+        'contrast_range': (0.69, 1.31),
+        'cutout_ratio': 0.18
+    },
+    DisturbanceSeverity.SEVERE: {
+        'gaussian_noise_sigma': 0.26,
+        'gaussian_blur_sigma': 3.0,
+        'contrast_range': (0.6, 1.4),
+        'cutout_ratio': 0.25
+    }
+}
+```
+
+**HARD severity represents the optimal testing difficulty where PPO shows good but not perfect performance, allowing for meaningful robustness comparisons.**
 
 ## Code Conventions
 

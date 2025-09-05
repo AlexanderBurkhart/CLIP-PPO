@@ -22,7 +22,7 @@ class DisturbanceTestArgs:
     
     # Severity configuration (overrides individual parameters if set)
     severity: Optional[DisturbanceSeverity] = DisturbanceSeverity.SEVERE
-    """Severity level (MILD, MODERATE, SEVERE) - overrides individual parameters"""
+    """Severity level (MILD, MODERATE, HARD, SEVERE) - overrides individual parameters"""
     
     # Disturbance toggles
     apply_gaussian_noise: bool = True

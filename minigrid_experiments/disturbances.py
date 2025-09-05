@@ -12,6 +12,7 @@ class DisturbanceSeverity(Enum):
     """Disturbance severity levels."""
     MILD = "mild"
     MODERATE = "moderate"
+    HARD = "hard"
     SEVERE = "severe"
 
 
@@ -28,6 +29,12 @@ SEVERITY_CONFIGS = {
         'gaussian_blur_sigma': 2.0,
         'contrast_range': (0.7, 1.3),
         'cutout_ratio': 0.17
+    },
+    DisturbanceSeverity.HARD: {
+        'gaussian_noise_sigma': 0.13,
+        'gaussian_blur_sigma': 2.1,
+        'contrast_range': (0.69, 1.31),
+        'cutout_ratio': 0.18
     },
     DisturbanceSeverity.SEVERE: {
         'gaussian_noise_sigma': 0.26,

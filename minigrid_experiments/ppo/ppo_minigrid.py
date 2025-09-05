@@ -19,6 +19,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
+from disturbances import DisturbanceWrapper, DisturbanceSeverity
 
 
 @dataclass
@@ -43,7 +44,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = 'MiniGrid-Empty-16x16-v0'
     """the id of the environment"""
-    total_timesteps: int = 10_000
+    total_timesteps: int = 100_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -83,6 +84,12 @@ class Args:
     """save model every N timesteps"""
     model_path: str = "checkpoints"
     """directory to save model checkpoints"""
+    
+    # Visual disturbance arguments
+    apply_disturbances: bool = False
+    """whether to apply visual disturbances during training"""
+    disturbance_severity: str = "MILD"
+    """disturbance severity level: MILD, MODERATE, SEVERE"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -193,6 +200,15 @@ if __name__ == "__main__":
     agent = Agent(envs).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
     
+    # Initialize disturbance wrapper if enabled
+    disturber = None
+    if args.apply_disturbances:
+        severity = getattr(DisturbanceSeverity, args.disturbance_severity)
+        disturber = DisturbanceWrapper(seed=args.seed, severity=severity)
+        print(f"Disturbances enabled with severity: {args.disturbance_severity}")
+    else:
+        print("Disturbances disabled")
+    
     # Create checkpoint directory
     if args.save_model:
         os.makedirs(args.model_path, exist_ok=True)
@@ -236,6 +252,13 @@ if __name__ == "__main__":
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
+            
+            # Apply visual disturbances if enabled
+            if disturber:
+                # Apply disturbances to each environment observation
+                for env_idx in range(args.num_envs):
+                    next_obs[env_idx] = disturber.apply_disturbances(next_obs[env_idx])
+                    
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
             if "final_info" in infos:
