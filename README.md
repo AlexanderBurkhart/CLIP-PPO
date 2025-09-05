@@ -12,7 +12,7 @@ This repository contains implementations of [cleanrl's PPO](https://github.com/v
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/AlexanderBurkhart/CLIP-PPO
 cd clip-ppo
 ```
 
