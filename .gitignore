@@ -8,3 +8,7 @@ __pycache__/
 # Ignore all test output
 videos/*
 runs/*
+checkpoints/*
+
+# Ignore test image
+lenna.png

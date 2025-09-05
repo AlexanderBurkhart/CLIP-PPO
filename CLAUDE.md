@@ -60,7 +60,7 @@ L_clip = 0.5 * (loss_z + loss_c)
 - **Gaussian Noise**: σ=0.08-0.26 across severity levels
 - **Gaussian Blur**: σ=1-3 kernel blur
 - **Contrast Jitter**: multiplicative factors 0.6-1.4
-- **Cutout/Occlusion**: 10-25% area random patches
+- **Cutout/Occlusion**: 10-25% area random black patches
 - **Sticky Actions**: p=0.25 (Atari-specific)
 - **Frame Skip Jitter**: Random frame skipping
 
@@ -176,6 +176,83 @@ The implementations use a shared utility (`minigrid_experiments/utils.py`) to av
 utils.save_checkpoint(agent, optimizer, iteration, global_step, args, checkpoint_path, b_returns, final=False)
 ```
 
+## Visual Disturbance Testing
+
+The repository includes a comprehensive visual disturbance testing system for robustness evaluation:
+
+### Disturbance Wrapper (`minigrid_experiments/disturbances.py`)
+
+The `DisturbanceWrapper` class provides configurable visual disturbances with severity levels:
+
+**Severity Levels:**
+- `DisturbanceSeverity.MILD`: Light disturbances for basic robustness testing
+- `DisturbanceSeverity.MODERATE`: Medium disturbances for standard evaluation  
+- `DisturbanceSeverity.SEVERE`: Heavy disturbances for stress testing
+
+**Severity Configuration:**
+```python
+SEVERITY_CONFIGS = {
+    DisturbanceSeverity.MILD: {
+        'gaussian_noise_sigma': 0.08,
+        'gaussian_blur_sigma': 1.0,
+        'contrast_range': (0.75, 1.25),
+        'cutout_ratio': 0.10
+    },
+    DisturbanceSeverity.MODERATE: {
+        'gaussian_noise_sigma': 0.12,
+        'gaussian_blur_sigma': 2.0,
+        'contrast_range': (0.7, 1.3),
+        'cutout_ratio': 0.17
+    },
+    DisturbanceSeverity.SEVERE: {
+        'gaussian_noise_sigma': 0.26,
+        'gaussian_blur_sigma': 3.0,
+        'contrast_range': (0.6, 1.4),
+        'cutout_ratio': 0.25
+    }
+}
+```
+
+**Usage:**
+```python
+# Use predefined severity level
+disturber = DisturbanceWrapper(severity=DisturbanceSeverity.SEVERE)
+
+# Use custom parameters (severity=None)
+disturber = DisturbanceWrapper(
+    severity=None,
+    gaussian_noise_sigma=0.2,
+    gaussian_blur_sigma=2.5,
+    contrast_range=(0.6, 1.4),
+    cutout_ratio=0.20
+)
+
+# Apply all disturbances
+disturbed_image = disturber.apply_disturbances(image)
+```
+
+### Disturbance Test Script (`minigrid_experiments/disturbances_test.py`)
+
+Interactive testing script for visualizing disturbances on sample images:
+
+```bash
+# Test with predefined severity
+python minigrid_experiments/disturbances_test.py --severity SEVERE
+
+# Test with custom parameters  
+python minigrid_experiments/disturbances_test.py --severity None --gaussian_noise_sigma 0.2 --cutout_ratio 0.3
+
+# Disable specific disturbances
+python minigrid_experiments/disturbances_test.py --apply_cutout False --apply_gaussian_blur False
+```
+
+**Features:**
+- Side-by-side visualization of original and disturbed images
+- Individual disturbance testing with `cv2.imshow`
+- Combined disturbance visualization
+- Configurable parameters with tyro command-line interface
+- Support for custom test images (defaults to `lenna.png`)
+
 ## Dependencies
 
 Core dependencies (based on imports):
@@ -188,6 +265,7 @@ Core dependencies (based on imports):
 - `tqdm`: Progress bars
 - `tensorboard`: Logging and visualization
 - `wandb`: Experiment tracking (optional)
+- `cv2`: Image processing and visualization (for disturbance testing)
 
 ## CLIP-PPO Implementation Details
 
