@@ -8,7 +8,7 @@ import numpy as np
 import tyro
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'minigrid_experiments'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
 from disturbances import DisturbanceSeverity
 from calculate_metrics import get_disturbance_severity, compute_robustness_index, compute_robustness_index_over_time, load_tensorboard_run, compute_final_success_rate
 
@@ -32,8 +32,8 @@ class ComparisonConfig:
     algorithms: tuple = (
         AlgorithmConfig('PPO', 'runs/ppo_clean', ['runs/ppo_hard']),
         AlgorithmConfig('CLIP_PPO', 'runs/clip_ppo_clean', ['runs/clip_ppo_hard']),
-        AlgorithmConfig('FROZEN', 'runs/clip_ppo_clean', ['runs/clip_ppo_frozen_clip_hard']),
-        AlgorithmConfig('RANDOM', 'runs/clip_ppo_clean', ['runs/clip_ppo_random_encoder_hard'])
+        AlgorithmConfig('FROZEN', 'runs/clip_ppo_frozen_clip_clean', ['runs/clip_ppo_frozen_clip_hard']),
+        AlgorithmConfig('RANDOM', 'runs/clip_ppo_random_encoder_clean', ['runs/clip_ppo_random_encoder_hard'])
     )
     """List of algorithm configurations"""
 

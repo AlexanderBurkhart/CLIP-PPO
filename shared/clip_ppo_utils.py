@@ -12,9 +12,9 @@ import numpy as np
 
 class AblationMode(Enum):
     """Ablation study modes for CLIP-PPO."""
-    NONE = "none"
-    FROZEN_CLIP = "frozen_clip" 
-    RANDOM_ENCODER = "random_encoder"
+    NONE = "NONE"
+    FROZEN_CLIP = "FROZEN_CLIP" 
+    RANDOM_ENCODER = "RANDOM_ENCODER"
 
 
 # CLIP ImageNet normalization constants
@@ -126,10 +126,11 @@ def generate_clip_embeddings(
         # Preprocess images for CLIP
         import torch.nn.functional as F
         clip_images = F.interpolate(
-            images.permute(0, 3, 1, 2).float() / 255.0,  # [B, C, H, W], convert to [0,1]
+            images.float() / 255.0,  # [B, C, H, W], convert to [0,1]
             size=(224, 224), 
             mode='bilinear', 
-            align_corners=False
+            align_corners=False,
+            antialias=True,
         )
         # Apply ImageNet normalization
         clip_images = (clip_images - clip_mean) / clip_std
@@ -166,7 +167,7 @@ def get_frozen_clip_features(
     Get features from frozen CLIP encoder with standard preprocessing.
     
     Args:
-        x: Input observations (batch of images)
+        x: Input observations (batch of images), assumed to be normalized
         clip_model: CLIP visual encoder (frozen)
         
     Returns:
@@ -179,15 +180,16 @@ def get_frozen_clip_features(
     clip_std = _CLIP_STD.to(x.device).view(1, 3, 1, 1)
     
     # Resize to 224x224 for CLIP and apply ImageNet normalization
-    x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+    x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False, antialias=True)
     # Apply ImageNet normalization
     x = (x - clip_mean) / clip_std
     # Convert to half precision to match CLIP model
     x = x.half()
-    if type(clip_model) == clip.model.VisionTransformer:
-        features = clip_model(x)
-    else:
-        features = clip_model.encode_image(x)
+    with torch.no_grad():
+        if type(clip_model) == clip.model.VisionTransformer:
+            features = clip_model(x)
+        else:
+            features = clip_model.encode_image(x)
     # Convert back to float32 for consistency with rest of pipeline
     return features.float()
 

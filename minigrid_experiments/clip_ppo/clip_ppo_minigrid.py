@@ -21,7 +21,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
-from disturbances import DisturbanceWrapper, DisturbanceSeverity
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Import shared CLIP-PPO utilities
@@ -29,6 +28,7 @@ shared_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 sys.path.insert(0, shared_path)
 import clip_ppo_utils
 import checkpoint_utils
+from disturbances import DisturbanceWrapper, DisturbanceSeverity
 
 
 @dataclass
@@ -242,8 +242,7 @@ class Agent(nn.Module):
 
     def _pre(self, x):
         # x: [B,H,W,C] -> [B,C,H,W]
-        if x.dim() == 4 and x.shape[-1] in (1, 3):
-            x = x.permute(0, 3, 1, 2).contiguous()
+        x = x.permute(0, 3, 1, 2).contiguous()
         return x / 255.0
 
     def _get_features(self, x):
@@ -478,7 +477,7 @@ if __name__ == "__main__":
                     modality=args.clip_config.clip_modality,
                     batch_size=args.batch_size,
                     device=device,
-                    images=b_obs
+                    images=b_obs.permute(0, 3, 1, 2).contiguous()
                 )
             else:
                 raise ValueError(f"Invalid clip_modality: {args.clip_config.clip_modality}. Must be 'image' or 'text'")
@@ -529,7 +528,7 @@ if __name__ == "__main__":
                 entropy_loss = entropy.mean()
                 
                 # CLIP alignment loss (disabled for frozen_clip ablation)
-                clip_loss = 0.0
+                clip_loss = torch.tensor(0.0, device=device)
                 if clip_ppo_utils.should_compute_clip_loss(args.clip_config.ablation_mode, args.clip_config.clip_lambda):
                     # Get PPO latent representations for minibatch (WITH gradients enabled)
                     ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
@@ -541,7 +540,7 @@ if __name__ == "__main__":
                     clip_loss = clip_ppo_utils.compute_cosine_embedding_loss(ppo_latents, mb_clip_embeddings)
                     
                     # Debug: Print key metrics for first epoch if verbose enabled
-                    if args.clip_config.verbose and start == 0 and epoch == 0:
+                    if args.verbose and start == 0 and epoch == 0:
                         print(f"Iter {iteration}")
                         print(f"Weighted CLIP loss: {args.clip_config.clip_lambda * clip_loss.item():>15.10f}")
                         print(f"PPO loss:           {pg_loss.item():>15.10f}")
@@ -571,7 +570,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        writer.add_scalar("losses/clip_loss", clip_loss.item() if clip_loss != 0.0 else clip_loss, global_step)
+        writer.add_scalar("losses/clip_loss", clip_loss.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         

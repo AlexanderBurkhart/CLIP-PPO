@@ -21,6 +21,7 @@ import ale_py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 import clip_ppo_utils
 import checkpoint_utils
+from disturbances import DisturbanceWrapper, DisturbanceSeverity
 
 # Import atari wrappers from parent directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -200,9 +201,8 @@ class Agent(nn.Module):
         """Get features from either CNN or frozen CLIP."""
         if self.ablation_mode == clip_ppo_utils.AblationMode.FROZEN_CLIP:
             # Convert frame stack to RGB format for CLIP
-            rgb_frames = convert_atari_frames_for_clip(x)  # [batch, H, W, 3]
-            # Convert to [batch, 3, H, W] format for CLIP
-            rgb_frames = rgb_frames.permute(0, 3, 1, 2).float() / 255.0  # [batch, 3, H, W]
+            rgb_frames = convert_atari_frames_for_clip(x)  # [batch, 3, 84, 84]
+            rgb_frames = rgb_frames.float() / 255.0  # [batch, 3, 84, 84]
             return clip_ppo_utils.get_frozen_clip_features(rgb_frames, self.clip_model)
         else:
             return self.network(x / 255.0)
@@ -232,7 +232,7 @@ def convert_atari_frames_for_clip(obs_batch):
         obs_batch: [batch_size, 4, 84, 84] grayscale frame stack
         
     Returns:
-        RGB images [batch_size, 84, 84, 3] suitable for CLIP preprocessing
+        RGB images [batch_size, 3, 84, 84] suitable for CLIP preprocessing
     """
     # Take the most recent frame from the stack (last channel)
     recent_frame = obs_batch[:, -1, :, :].unsqueeze(1)  # [batch, 1, 84, 84]
@@ -240,10 +240,7 @@ def convert_atari_frames_for_clip(obs_batch):
     # Convert grayscale to RGB by repeating across channels
     rgb_frames = recent_frame.repeat(1, 3, 1, 1)  # [batch, 3, 84, 84]
     
-    # Convert to [batch, H, W, C] format and scale to [0, 255]
-    rgb_frames = rgb_frames.permute(0, 2, 3, 1) * 255.0  # [batch, 84, 84, 3]
-    
-    return rgb_frames.clamp(0, 255).byte()
+    return rgb_frames
 
 
 def generate_breakout_descriptions(envs, batch_size: int) -> list:
@@ -284,7 +281,7 @@ def generate_breakout_descriptions(envs, batch_size: int) -> list:
                 ball_paddle_distance = abs(ball_x - paddle_x)
                 
                 # Start with base description
-                description = f"Breakout score {score}, ball ({ball_x},{ball_y}), paddle ({paddle_x})"
+                description = f"Breakout score {score}, ball ({ball_x},{ball_y}), paddle ({paddle_x}), lives {lives}"
                 
                 # Add state-specific context
                 if ball_paddle_distance < 15 and ball_y > 180:
@@ -377,10 +374,12 @@ def generate_pong_descriptions(envs, batch_size: int) -> list:
                 
             except:
                 # Fallback for individual environment if RAM extraction fails
+                print("WARNING: environment access failed for generating description")
                 result.append(f"Pong: player vs computer paddle tennis match")
                 
     except:
         # Complete fallback if environment access fails
+        print("WARNING: environment access failed for generating description")
         for i in range(batch_size):
             result.append(f"Pong: classic paddle tennis gameplay")
     
@@ -430,6 +429,12 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
+    
+    # Log disturbance severity for metrics analysis
+    if args.clip_config.apply_disturbances:
+        writer.add_text("config/disturbance_severity", args.clip_config.disturbance_severity)
+    else:
+        writer.add_text("config/disturbance_severity", "CLEAN")
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -444,6 +449,15 @@ if __name__ == "__main__":
         [make_env(args.env_id, i, args.capture_video, run_name) for i in range(args.num_envs)],
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+
+    # Initialize disturbance wrapper if enabled
+    disturber = None
+    if args.clip_config.apply_disturbances:
+        severity = DisturbanceSeverity(args.clip_config.disturbance_severity.lower())
+        disturber = DisturbanceWrapper(severity=severity)
+        print(f"Disturbances enabled with severity: {args.clip_config.disturbance_severity}")
+    else:
+        print("Disturbances disabled")
 
     # CLIP-PPO: Load CLIP model if needed (before creating agent)
     clip_model = None
@@ -479,13 +493,12 @@ if __name__ == "__main__":
         start_iteration += 1  # Start from next iteration
 
     # TRY NOT TO MODIFY: start the game
-    global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
-    for iteration in tqdm.tqdm(range(1, args.num_iterations + 1)):
+    for iteration in tqdm.tqdm(range(start_iteration, args.num_iterations + 1)):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
@@ -494,6 +507,19 @@ if __name__ == "__main__":
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
+            
+            # Apply disturbances if enabled
+            if disturber:
+                # Convert entire batch to numpy once, apply disturbances, convert back
+                next_obs_np = next_obs.cpu().numpy()  # [8, 4, 84, 84]
+                # Reshape from [8, 4, 84, 84] to [8, 84, 84, 4] for disturbance wrapper
+                next_obs_reshaped = next_obs_np.transpose(0, 2, 3, 1)  # [8, 84, 84, 4]
+                for env_idx in range(args.num_envs):
+                    next_obs_reshaped[env_idx] = disturber.apply_disturbances(next_obs_reshaped[env_idx])
+                # Reshape back from [8, 84, 84, 4] to [8, 4, 84, 84]
+                next_obs_np = next_obs_reshaped.transpose(0, 3, 1, 2)  # [8, 4, 84, 84]
+                next_obs = torch.from_numpy(next_obs_np).to(device)
+            
             obs[step] = next_obs
             dones[step] = next_done
 
@@ -666,7 +692,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        writer.add_scalar("losses/clip_loss", clip_loss.item() if clip_loss != 0.0 else clip_loss, global_step)
+        writer.add_scalar("losses/clip_loss", clip_loss.item(), global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         

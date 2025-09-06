@@ -8,7 +8,7 @@ from typing import List
 import tyro
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'minigrid_experiments'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
 from disturbances import DisturbanceSeverity
 from calculate_metrics import get_disturbance_severity, compute_robustness_index
 

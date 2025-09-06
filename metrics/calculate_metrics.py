@@ -9,7 +9,7 @@ from typing import List, Tuple
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 # Add path to access disturbances module
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'minigrid_experiments'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
 from disturbances import DisturbanceSeverity
 
 
@@ -84,20 +84,7 @@ def get_disturbance_severity(run_path: str) -> DisturbanceSeverity:
             }
             
             return severity_mapping.get(severity_text, DisturbanceSeverity.NONE)
-    
-    # Fallback: try to infer from run path
-    if 'clean' in run_path.lower():
-        return DisturbanceSeverity.NONE
-    elif 'mild' in run_path.lower():
-        return DisturbanceSeverity.MILD
-    elif 'moderate' in run_path.lower():
-        return DisturbanceSeverity.MODERATE
-    elif 'hard' in run_path.lower():
-        return DisturbanceSeverity.HARD
-    elif 'severe' in run_path.lower():
-        return DisturbanceSeverity.SEVERE
-    
-    return DisturbanceSeverity.NONE
+    raise ValueError(f"Unable to find disturbance severity in run_path {run_path}.")
 
 
 def compute_robustness_index_over_time(clean_run_path: str, disturbed_run_path: str, window_size: int = 50) -> pd.DataFrame:
