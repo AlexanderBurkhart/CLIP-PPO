@@ -431,6 +431,167 @@ SEVERITY_CONFIGS = {
 
 **HARD severity represents the optimal testing difficulty where PPO shows good but not perfect performance, allowing for meaningful robustness comparisons.**
 
+## Evaluation Metrics System
+
+A comprehensive metrics system has been developed for robustness analysis and paper evaluation:
+
+### Metrics Organization (`metrics/` directory)
+
+**Core Files:**
+- `evaluate_run.py`: Single run analysis with comprehensive plots
+- `compare_disturbances.py`: Cross-disturbance robustness analysis  
+- `calculate_metrics.py`: Shared utility functions for metric computation
+
+### Key Metrics Implemented
+
+**1. Robustness Index (RI)**
+```
+RI = disturbed_performance / clean_performance
+```
+- Higher values indicate better robustness (1.0 = perfect robustness)
+- Primary metric for comparing algorithm robustness across disturbance levels
+
+**2. Area Under Curve (AUC)**
+- Measures sample efficiency and overall learning performance
+- Computed using trapezoidal integration over learning curves
+- Normalized by timestep range for fair comparison
+
+**3. Learning Curve Analysis**
+- Rolling window smoothing for clean visualization
+- Raw data overlay for variance assessment
+- Final performance values displayed in legends
+
+### Visualization Capabilities
+
+**Single Run Analysis (`evaluate_run.py`):**
+- AUC comparison bar charts
+- Learning curves (returns vs timesteps)
+- Robustness analysis (2x2 subplot grid):
+  - Returns over time comparison
+  - Robustness index evolution  
+  - Performance gap visualization
+  - Robustness index distribution
+
+**Cross-Disturbance Analysis (`compare_disturbances.py`):**
+- Bar charts of robustness index across severity levels
+- Color-coded severity progression (green→red)
+- Perfect robustness reference lines
+- Automatic severity detection from TensorBoard logs
+
+### Disturbance Severity Logging
+
+**Automatic Severity Tracking:**
+- Disturbance severity logged to TensorBoard as `config/disturbance_severity`
+- Values: "CLEAN", "MILD", "MODERATE", "HARD", "SEVERE"
+- Enables automatic run categorization and analysis
+
+**Integration with Training:**
+```python
+if args.apply_disturbances:
+    writer.add_text("config/disturbance_severity", args.disturbance_severity)
+else:
+    writer.add_text("config/disturbance_severity", "CLEAN")
+```
+
+### Episode Logging Fixes
+
+**MiniGrid Compatibility:**
+Fixed episodic return logging to handle MiniGrid's vectorized episode format:
+```python
+if "episode" in infos:
+    episode_info = infos["episode"]
+    if episode_info is not None and "_r" in episode_info:
+        completed_episodes = episode_info["_r"]  # Boolean array
+        returns = episode_info["r"]  # Return values
+        lengths = episode_info["l"]  # Episode lengths
+        
+        for env_idx, completed in enumerate(completed_episodes):
+            if completed:  # Only log completed episodes
+                writer.add_scalar("charts/episodic_return", float(returns[env_idx]), global_step)
+                writer.add_scalar("charts/episodic_length", int(lengths[env_idx]), global_step)
+```
+
+### Metrics System Architecture
+
+**Unified Function Structure:**
+- `compute_robustness_index_over_time()`: Central function in `calculate_metrics.py` for RI calculation with rolling windows
+- `compute_robustness_index()`: Wrapper that returns final RI value from the over-time function
+- **Parameter**: `window_size` (default=50 for rolling average, set to 1 for raw values)
+
+**Script Organization:**
+- `evaluate_run.py`: Single run analysis (RI analysis, AUC comparison, learning curves)
+- `compare_disturbances.py`: Cross-disturbance analysis (bar charts + RI curves over time)
+- `compare_algorithms.py`: Multi-algorithm comparison across all metrics
+- `calculate_metrics.py`: Shared utility functions
+
+### Usage Examples
+
+**Single Run Analysis:**
+```bash
+cd metrics
+python evaluate_run.py --clean-run-path ../runs/ppo_clean --disturbed-run-path ../runs/ppo_hard
+```
+
+**Cross-Disturbance Analysis:**
+```bash
+python compare_disturbances.py --algorithm-name "PPO" --clean-run-path "../runs/ppo_clean" --disturbance-runs '["../runs/ppo_mild", "../runs/ppo_moderate", "../runs/ppo_hard", "../runs/ppo_severe"]'
+```
+
+**Multi-Algorithm Comparison:**
+```bash
+python compare_algorithms.py  # Uses tyro.cli with predefined algorithm configurations
+```
+
+### Algorithm Comparison Features
+
+**`compare_algorithms.py` provides comprehensive ablation analysis:**
+
+**Data Structure:**
+```python
+@dataclass
+class AlgorithmConfig:
+    name: str                    # Display name (e.g., "CLIP-PPO (λ=0.1)")
+    clean_run_path: str         # Clean environment run
+    disturbed_run_paths: List[str]  # List of disturbed runs
+```
+
+**Visualization Functions:**
+1. `plot_ri_comparison_across_algorithms()`: Bar charts comparing RI across algorithms for each disturbance level
+2. `plot_learning_curves_comparison()`: Learning curves for all algorithms (clean environment)
+3. `plot_robustness_curves_comparison()`: RI over time with options:
+   - `all_levels=True`: Single plot with all algorithms and disturbance levels
+   - `disturbance_level="HARD"`: Single disturbance level comparison
+   - **Line differentiation**: Colors for algorithms, line styles for disturbance levels
+
+**Ablation Study Configuration Example:**
+```python
+algorithms = [
+    AlgorithmConfig("PPO", "runs/ppo_clean", ["runs/ppo_hard", "runs/ppo_severe"]),
+    AlgorithmConfig("CLIP-PPO (λ=0.1)", "runs/clip_ppo_0.1_clean", ["runs/clip_ppo_0.1_hard", "runs/clip_ppo_0.1_severe"]),
+    AlgorithmConfig("CLIP-PPO (λ=0.01)", "runs/clip_ppo_0.01_clean", ["runs/clip_ppo_0.01_hard", "runs/clip_ppo_0.01_severe"]),
+    AlgorithmConfig("CLIP-PPO (Text Only)", "runs/clip_ppo_text_clean", ["runs/clip_ppo_text_hard", "runs/clip_ppo_text_severe"]),
+    AlgorithmConfig("CLIP-PPO (Image Only)", "runs/clip_ppo_image_clean", ["runs/clip_ppo_image_hard", "runs/clip_ppo_image_severe"])
+]
+```
+
+### Critical Gradient Flow Fix
+
+**Problem Identified:**
+CLIP loss gradients were flowing through shared CNN backbone to both actor and critic, potentially destabilizing value function learning.
+
+**Solution Applied:**
+Added `.detach()` in `get_latent_representation()` to isolate CLIP gradients:
+```python
+def get_latent_representation(self, x):
+    x = self._pre(x)
+    return self.network(x).detach()  # Prevents CLIP gradients from affecting shared CNN
+```
+
+This ensures:
+- PPO actor/critic gradients still share CNN features (standard architecture)
+- CLIP alignment loss doesn't interfere with value function learning
+- Maintains semantic grounding for policy while preserving training stability
+
 ## Code Conventions
 
 - Uses CleanRL coding style and structure
@@ -439,3 +600,4 @@ SEVERITY_CONFIGS = {
 - Environment wrappers: `ImgObsWrapper`, `ResizeObservation`, `RecordEpisodeStatistics`
 - **Module imports**: Uses `sys.path.insert()` for clean imports without PYTHONPATH requirements
 - **Shared utilities**: Common functions in `minigrid_experiments/utils.py`
+- **Metrics separation**: Evaluation code organized in dedicated `metrics/` directory

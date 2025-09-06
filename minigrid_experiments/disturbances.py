@@ -10,6 +10,7 @@ from enum import Enum
 
 class DisturbanceSeverity(Enum):
     """Disturbance severity levels."""
+    NONE = "none"
     MILD = "mild"
     MODERATE = "moderate"
     HARD = "hard"

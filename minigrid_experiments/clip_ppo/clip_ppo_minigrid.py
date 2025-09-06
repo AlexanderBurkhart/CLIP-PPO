@@ -3,6 +3,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from enum import Enum
 import tqdm
 
 import gymnasium as gym
@@ -21,6 +22,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
 from disturbances import DisturbanceWrapper, DisturbanceSeverity
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+class AblationMode(Enum):
+    """Ablation study modes for CLIP-PPO."""
+    NONE = "none"
+    FROZEN_CLIP = "frozen_clip" 
+    RANDOM_ENCODER = "random_encoder"
 
 
 @dataclass
@@ -43,9 +52,9 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
  
     # Algorithm specific arguments
-    env_id: str = 'MiniGrid-DoorKey-6x6-v0'
+    env_id: str = 'MiniGrid-Empty-16x16-v0'
     """the id of the environment"""
-    total_timesteps: int = 1_500_000
+    total_timesteps: int = 250_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -79,7 +88,7 @@ class Args:
     """the target KL divergence threshold"""
     
     # CLIP-PPO specific arguments
-    clip_lambda: float = 0#.00001
+    clip_lambda: float = 0.00001
     """coefficient for CLIP alignment loss"""
     clip_model: str = "ViT-B/32"
     """CLIP model variant to use"""
@@ -88,6 +97,10 @@ class Args:
     verbose: bool = True
     """enable verbose debug output for CLIP-PPO losses"""
     
+    # Ablation study arguments
+    ablation_mode: AblationMode = AblationMode.RANDOM_ENCODER
+    """ablation mode for controlled experiments"""
+    
     # Model saving arguments
     save_model: bool = True
     """whether to save model checkpoints"""
@@ -95,14 +108,18 @@ class Args:
     """save model every N timesteps"""
     model_path: str = "checkpoints"
     """directory to save model checkpoints"""
-    resume_checkpoint: str = 'checkpoints/doorkey_ppo_hard.pt'
+    resume_checkpoint: str = '' # 'checkpoints/MiniGrid-DoorKey-6x6-v0__clip_ppo_minigrid__1__1757108063_final.pt'
     """path to checkpoint file to resume training from"""
     
     # Visual disturbance arguments
-    apply_disturbances: bool = True
+    apply_disturbances: bool = False
     """whether to apply visual disturbances during training"""
-    disturbance_severity: str = "HARD"
+    disturbance_severity: str = "MODERATE"
     """disturbance severity level: MILD, MODERATE, HARD, SEVERE"""
+    
+    # Run naming arguments
+    run_name: str = ""
+    """custom run name (if empty, uses default format)"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -237,21 +254,36 @@ def get_symbolic_descriptions(envs):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs):
+    def __init__(self, envs, ablation_mode=AblationMode.NONE, clip_model=None):
         super().__init__()
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(3, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
-            nn.ReLU(),
-        )
-        self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
-        self.critic = layer_init(nn.Linear(512, 1), std=1)
+        self.ablation_mode = ablation_mode
+        
+        if ablation_mode == AblationMode.FROZEN_CLIP:
+            # Use frozen CLIP vision encoder as feature extractor
+            if clip_model is None:
+                raise ValueError("CLIP model required for frozen_clip ablation")
+            self.network = clip_model.visual
+            # Freeze CLIP parameters
+            for param in self.network.parameters():
+                param.requires_grad = False
+            feature_dim = 512
+        else:
+            # Standard CNN or random encoder
+            self.network = nn.Sequential(
+                layer_init(nn.Conv2d(3, 32, 8, stride=4)),
+                nn.ReLU(),
+                layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+                nn.ReLU(),
+                layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+                nn.ReLU(),
+                nn.Flatten(),
+                layer_init(nn.Linear(64 * 7 * 7, 512)),
+                nn.ReLU(),
+            )
+            feature_dim = 512
+        
+        self.actor = layer_init(nn.Linear(feature_dim, envs.single_action_space.n), std=0.01)
+        self.critic = layer_init(nn.Linear(feature_dim, 1), std=1)
 
     def _pre(self, x):
         # x: [B,H,W,C] -> [B,C,H,W]
@@ -259,13 +291,20 @@ class Agent(nn.Module):
             x = x.permute(0, 3, 1, 2).contiguous()
         return x / 255.0
 
+    def _get_features(self, x):
+        """Get features based on ablation mode."""
+        if self.ablation_mode == AblationMode.FROZEN_CLIP:
+            return self._get_frozen_clip_features(x)
+        else:
+            return self.network(x)
+
     def get_value(self, x):
         x = self._pre(x)
-        return self.critic(self.network(x))
+        return self.critic(self._get_features(x))
 
     def get_action_and_value(self, x, action=None):
         x = self._pre(x)
-        hidden = self.network(x)
+        hidden = self._get_features(x)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
@@ -274,7 +313,22 @@ class Agent(nn.Module):
     
     def get_latent_representation(self, x):
         x = self._pre(x)
-        return self.network(x)
+        return self._get_features(x)  # .detach()
+    
+    def _get_frozen_clip_features(self, x):
+        """Get features from frozen CLIP encoder."""
+        import torch.nn.functional as F
+        # Resize to 224x224 for CLIP and apply ImageNet normalization
+        x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+        # Use existing clip_mean/clip_std from main function
+        global clip_mean, clip_std
+        x = (x - clip_mean) / clip_std
+        # Convert to half precision to match CLIP model
+        x = x.half()
+        features = self.network(x)
+        # Convert back to float32 for consistency with rest of pipeline
+        return features.float()
+    
 
 
 if __name__ == "__main__":
@@ -282,7 +336,12 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    
+    # Use custom run name if provided, otherwise use default format
+    if args.run_name:
+        run_name = args.run_name
+    else:
+        run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
 
@@ -300,6 +359,12 @@ if __name__ == "__main__":
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
+    
+    # Log disturbance severity for easy access
+    if args.apply_disturbances:
+        writer.add_text("config/disturbance_severity", args.disturbance_severity)
+    else:
+        writer.add_text("config/disturbance_severity", "CLEAN")
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -315,12 +380,12 @@ if __name__ == "__main__":
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent(envs).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
-    
-    # Load CLIP model
+    # Load CLIP model (needed for both normal CLIP-PPO and frozen_clip ablation)
     clip_model, clip_preprocess = clip.load(args.clip_model, device=device)
     clip_model.eval()  # Keep CLIP frozen
+    
+    agent = Agent(envs, ablation_mode=args.ablation_mode, clip_model=clip_model).to(device)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
     
     # Pre-create CLIP normalization tensors (avoid recreation every iteration)
     clip_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).to(device).view(1, 3, 1, 1)
@@ -407,12 +472,21 @@ if __name__ == "__main__":
                     
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            # Handle MiniGrid vectorized episode format
+            if "episode" in infos:
+                episode_info = infos["episode"]
+                if episode_info is not None and "_r" in episode_info:
+                    # MiniGrid format: _r indicates which envs completed episodes
+                    completed_episodes = episode_info["_r"]  # Boolean array
+                    returns = episode_info["r"]  # Return values
+                    lengths = episode_info["l"]  # Episode lengths
+                    
+                    for env_idx, completed in enumerate(completed_episodes):
+                        if completed:  # Only log completed episodes
+                            episodic_return = float(returns[env_idx])
+                            episode_length = int(lengths[env_idx])
+                            writer.add_scalar("charts/episodic_return", episodic_return, global_step)
+                            writer.add_scalar("charts/episodic_length", episode_length, global_step)
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -441,24 +515,25 @@ if __name__ == "__main__":
         # Pre-compute CLIP embeddings once per iteration (before minibatch loop)
         if args.clip_lambda > 0.0:
             with torch.no_grad():
-                # Use both CLIP image and text encoders
-                import torch.nn.functional as F
-                clip_images = F.interpolate(
-                    b_obs.permute(0, 3, 1, 2).float() / 255.0,  # [B, C, H, W], convert to [0,1]
-                    size=(224, 224), 
-                    mode='bilinear', 
-                    align_corners=False
-                )
-                
-                # Apply ImageNet normalization using pre-created tensors
-                clip_images = (clip_images - clip_mean) / clip_std
-                
+                if args.ablation_mode == AblationMode.RANDOM_ENCODER:
+                    # Use random embeddings instead of CLIP embeddings
+                    clip_embeddings = torch.randn(args.batch_size, 512, device=device)
+                    clip_embeddings = torch.nn.functional.normalize(clip_embeddings, dim=-1)
                 # Generate CLIP embeddings based on selected modality
-                if args.clip_modality == "image":
+                elif args.clip_modality == "image":
+                    import torch.nn.functional as F
+                    clip_images = F.interpolate(
+                        b_obs.permute(0, 3, 1, 2).float() / 255.0,  # [B, C, H, W], convert to [0,1]
+                        size=(224, 224), 
+                        mode='bilinear', 
+                        align_corners=False
+                    )
+                    
+                    # Apply ImageNet normalization using pre-created tensors
+                    clip_images = (clip_images - clip_mean) / clip_std
                     # Use only CLIP image embeddings
                     clip_image_embeddings = clip_model.encode_image(clip_images)
                     clip_embeddings = torch.nn.functional.normalize(clip_image_embeddings, dim=-1)
-                    
                 elif args.clip_modality == "text":
                     # Use only CLIP text embeddings
                     # Flatten text_descriptions to match b_obs structure
@@ -468,7 +543,6 @@ if __name__ == "__main__":
                     text_tokens = clip.tokenize(batch_descriptions).to(device)
                     clip_text_embeddings = clip_model.encode_text(text_tokens)
                     clip_embeddings = torch.nn.functional.normalize(clip_text_embeddings, dim=-1)
-                    
                 else:
                     raise ValueError(f"Invalid clip_modality: {args.clip_modality}. Must be 'image' or 'text'")
 
@@ -517,9 +591,9 @@ if __name__ == "__main__":
 
                 entropy_loss = entropy.mean()
                 
-                # CLIP alignment loss
+                # CLIP alignment loss (disabled for frozen_clip ablation)
                 clip_loss = 0.0
-                if args.clip_lambda > 0.0:
+                if args.clip_lambda > 0.0 and args.ablation_mode != AblationMode.FROZEN_CLIP:
                     # Get PPO latent representations for minibatch (WITH gradients enabled)
                     ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
                     
@@ -560,8 +634,7 @@ if __name__ == "__main__":
         writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
         writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
-        if args.clip_lambda > 0.0:
-            writer.add_scalar("losses/clip_loss", clip_loss.item(), global_step)
+        writer.add_scalar("losses/clip_loss", clip_loss.item() if clip_loss != 0.0 else clip_loss, global_step)
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
         
