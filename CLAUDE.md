@@ -4,10 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-This is a CLIP-PPO research repository for ICLR that implements PPO (Proximal Policy Optimization) algorithms enhanced with CLIP-based semantic regularization. The codebase contains two main implementations:
+This is a CLIP-PPO research repository for ICLR that implements PPO (Proximal Policy Optimization) algorithms enhanced with CLIP-based semantic regularization. The codebase contains implementations for both MiniGrid and Atari environments:
 
+**MiniGrid Implementations:**
 - `minigrid_experiments/ppo/ppo_minigrid.py`: Standard PPO implementation for MiniGrid environments
 - `minigrid_experiments/clip_ppo/clip_ppo_minigrid.py`: CLIP-enhanced PPO implementation with semantic regularization
+
+**Atari Implementations:**
+- `atari_experiments/clip_ppo/clip_ppo_atari.py`: CLIP-enhanced PPO implementation for Atari environments with game-specific RAM state descriptions
+
+**Shared Utilities:**
+- `shared/clip_ppo_utils.py`: Centralized CLIP-PPO functionality and configuration
+- `shared/checkpoint_utils.py`: Model checkpointing utilities
+- `run_ablations.py`: Unified ablation study runner supporting both MiniGrid and Atari environments
 
 ## Project Design Context
 
@@ -88,8 +97,9 @@ source .venv/bin/activate  # Activate the virtual environment
 
 ## Running Experiments
 
-### Basic PPO Training
+### Basic Training
 
+**MiniGrid Experiments:**
 ```bash
 # Run standard PPO on MiniGrid
 python minigrid_experiments/ppo/ppo_minigrid.py
@@ -98,17 +108,31 @@ python minigrid_experiments/ppo/ppo_minigrid.py
 python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py
 ```
 
+**Atari Experiments:**
+```bash
+# Run CLIP-PPO on Atari environments
+python atari_experiments/clip_ppo/clip_ppo_atari.py --env_id BreakoutNoFrameskip-v4
+python atari_experiments/clip_ppo/clip_ppo_atari.py --env_id PongNoFrameskip-v4
+```
+
+**Unified Ablation Studies:**
+```bash
+# Run all ablation experiments (supports both MiniGrid and Atari)
+python run_ablations.py
+```
+
 ### Key Parameters
 
-Both scripts use `tyro` for command-line arguments. Key parameters include:
+All scripts use `tyro` for command-line arguments. Key parameters include:
 
 **General Parameters:**
-- `--env_id`: MiniGrid environment (default: 'MiniGrid-Empty-16x16-v0')
-- `--total_timesteps`: Training duration (default: 500,000)
+- `--env_id`: Environment ID (MiniGrid: 'MiniGrid-Empty-16x16-v0', Atari: 'BreakoutNoFrameskip-v4')
+- `--total_timesteps`: Training duration (MiniGrid default: 500,000, Atari default: 100,000)
 - `--num_envs`: Parallel environments (default: 8)
 - `--learning_rate`: Optimizer learning rate (default: 2.5e-4)
 - `--track`: Enable Weights & Biases tracking
 - `--capture_video`: Record agent performance videos
+- `--verbose`: Enable detailed loss logging for CLIP-PPO
 
 **Model Saving Parameters:**
 - `--save_model`: Enable model checkpointing (default: True)
@@ -116,40 +140,77 @@ Both scripts use `tyro` for command-line arguments. Key parameters include:
 - `--model_path`: Checkpoint directory (default: "checkpoints")
 - `--resume_checkpoint`: Path to checkpoint file to resume training from
 
-**CLIP-PPO Specific Parameters:**
-- `--clip_lambda`: CLIP alignment loss coefficient (default: 0.00001)
-- `--clip_model`: CLIP model variant (default: "ViT-B/32")
-- `--clip_modality`: CLIP modality selection ("image" or "text", default: "text")
+**CLIP-PPO Configuration (via `--clip_config`):**
+- `clip_lambda`: CLIP alignment loss coefficient (default: 0.00001)
+- `clip_model`: CLIP model variant (default: "ViT-B/32")
+- `clip_modality`: CLIP modality selection ("image" or "text", default: "text")
+- `ablation_mode`: Ablation study mode ("none", "frozen_clip", "random_encoder")
+- `apply_disturbances`: Enable visual disturbances during training
+- `disturbance_severity`: Severity level ("MILD", "MODERATE", "HARD", "SEVERE")
 
 ### Usage Examples
 
+**MiniGrid:**
 ```bash
 # Standard PPO with custom parameters
 python minigrid_experiments/ppo/ppo_minigrid.py --env_id MiniGrid-DoorKey-6x6-v0 --total_timesteps 1000000 --save_freq 50000
 
 # CLIP-PPO with different lambda values
-python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_lambda 0.01 --total_timesteps 1000000
+python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_config.clip_lambda 0.01 --total_timesteps 1000000
 
 # CLIP-PPO with image modality
-python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_modality image --clip_lambda 0.00001
+python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_config.clip_modality image --clip_config.clip_lambda 0.00001
 
 # Disable CLIP alignment (pure PPO)
-python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_lambda 0.0
+python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --clip_config.clip_lambda 0.0
 
 # Resume training from checkpoint
 python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --resume_checkpoint checkpoints/run_name_latest.pt
+```
+
+**Atari:**
+```bash
+# CLIP-PPO on Breakout with text descriptions
+python atari_experiments/clip_ppo/clip_ppo_atari.py --env_id BreakoutNoFrameskip-v4 --clip_config.clip_modality text
+
+# CLIP-PPO on Pong with different lambda
+python atari_experiments/clip_ppo/clip_ppo_atari.py --env_id PongNoFrameskip-v4 --clip_config.clip_lambda 0.0001
+
+# Ablation: Random encoder on Breakout
+python atari_experiments/clip_ppo/clip_ppo_atari.py --env_id BreakoutNoFrameskip-v4 --clip_config.ablation_mode random_encoder
+
+# Ablation: Frozen CLIP on Pong
+python atari_experiments/clip_ppo/clip_ppo_atari.py --env_id PongNoFrameskip-v4 --clip_config.ablation_mode frozen_clip
 
 # Enable W&B tracking
-python minigrid_experiments/clip_ppo/clip_ppo_minigrid.py --track --wandb_project_name clip-ppo-experiments
+python atari_experiments/clip_ppo/clip_ppo_atari.py --track --wandb_project_name clip-ppo-experiments
+```
+
+**Ablation Studies:**
+```bash
+# Run all ablation experiments (auto-detects environment type)
+python run_ablations.py
+
+# Edit run_ablations.py to switch between MiniGrid and Atari experiments
+# Set experiments list to minigrid_experiments or atari_experiments
 ```
 
 ## Architecture
 
 ### Agent Architecture
+
+**MiniGrid Agent:**
 - **Feature Extractor**: CNN with 3 convolutional layers (32→64→64 filters)
 - **Policy Head**: Linear layer outputting action logits
 - **Value Head**: Linear layer outputting state values
 - **Input Processing**: RGB images (84x84) from MiniGrid environments
+
+**Atari Agent:**
+- **Feature Extractor**: CNN with 3 convolutional layers (32→64→64 filters) + flattening + linear (512-dim)
+- **Policy Head**: Linear layer outputting action logits
+- **Value Head**: Linear layer outputting state values  
+- **Input Processing**: Grayscale frame stack (4 frames, 84x84) from Atari environments
+- **Preprocessing**: NoopReset, MaxAndSkip, EpisodicLife, FireReset, ClipReward, Resize, Grayscale, FrameStack
 
 ### Training Loop
 1. **Data Collection**: Parallel environment rollouts using vectorized environments
@@ -293,17 +354,44 @@ Core dependencies (based on imports):
 ## CLIP-PPO Implementation Details
 
 ### Semantic Regularization
-- **Text Descriptions**: Generated from MiniGrid's internal state (agent position, objects, etc.)
+
+**MiniGrid Descriptions:**
+- **Text Generation**: Generated from MiniGrid's internal state (agent position, objects, etc.)
+- **Function**: `get_symbolic_descriptions()` extracts symbolic game state
+
+**Atari Descriptions:**
+- **Text Generation**: Generated from game-specific RAM state analysis
+- **Breakout**: `generate_breakout_descriptions()` - Score, ball position (x,y), paddle position, contextual game state
+- **Pong**: `generate_pong_descriptions()` - Player/computer scores, ball position (x,y), both paddle positions, ball movement context  
+- **RAM Analysis**: Direct memory access for precise game state extraction
+- **Fallback System**: Graceful degradation to generic descriptions if RAM access fails
+
+**General CLIP Integration:**
 - **CLIP Model**: Frozen ViT-B/32 for semantic stability
 - **Modality Selection**: Configurable via `clip_modality` parameter ("image" or "text")
 - **Alignment Loss**: Cosine embedding loss between PPO latents (512-dim) and CLIP embeddings
 - **Integration**: Added to PPO loss as `L_total = L_ppo + λ*L_clip`
 
 ### Key Functions
-- `get_symbolic_descriptions()`: Extracts MiniGrid state to text descriptions
+
+**Shared Utilities (`shared/clip_ppo_utils.py`):**
 - `compute_cosine_embedding_loss()`: Calculates cosine similarity-based alignment loss with dimension validation
-- `compute_l2_embedding_loss()`: Calculates L2 distance-based alignment loss (alternative)
-- `Agent.get_latent_representation()`: Exposes PPO hidden states
+- `generate_clip_embeddings()`: Unified CLIP embedding generation with ablation mode support
+- `load_clip_model()`: Loads and freezes CLIP model for inference
+- `should_compute_clip_loss()`: Determines when to compute CLIP loss based on ablation mode
+- `ClipPPOConfig`: Shared configuration dataclass for CLIP-PPO parameters
+
+**MiniGrid-Specific:**
+- `get_symbolic_descriptions()`: Extracts MiniGrid state to text descriptions
+
+**Atari-Specific (`atari_experiments/clip_ppo/clip_ppo_atari.py`):**
+- `generate_atari_descriptions()`: Main dispatcher function for game-specific descriptions
+- `generate_breakout_descriptions()`: Breakout RAM state analysis (score, ball/paddle positions, context)
+- `generate_pong_descriptions()`: Pong RAM state analysis (scores, ball/paddle positions, movement context)
+- `convert_atari_frames_for_clip()`: Converts Atari frame stacks to CLIP-compatible RGB format
+
+**Common:**
+- `Agent.get_latent_representation()`: Exposes PPO hidden states for CLIP alignment
 
 ### Implementation Fixes Applied
 The current implementation includes several critical fixes:
@@ -595,9 +683,120 @@ This ensures:
 ## Code Conventions
 
 - Uses CleanRL coding style and structure
-- CNN architecture designed for 84x84 RGB input → 7x7 feature maps  
+- CNN architecture designed for 84x84 input → 7x7 feature maps (RGB for MiniGrid, grayscale for Atari)
 - Orthogonal weight initialization with custom standard deviations
-- Environment wrappers: `ImgObsWrapper`, `ResizeObservation`, `RecordEpisodeStatistics`
 - **Module imports**: Uses `sys.path.insert()` for clean imports without PYTHONPATH requirements
-- **Shared utilities**: Common functions in `minigrid_experiments/utils.py`
+- **Shared utilities**: Centralized functions in `shared/` directory for code reuse across environments
 - **Metrics separation**: Evaluation code organized in dedicated `metrics/` directory
+- **Configuration structure**: Separate config dataclasses with composition pattern (not inheritance)
+
+### Environment-Specific Wrappers
+
+**MiniGrid:**
+- `ImgObsWrapper`, `ResizeObservation`, `RecordEpisodeStatistics`
+
+**Atari:**
+- `NoopResetEnv`, `MaxAndSkipEnv`, `EpisodicLifeEnv`, `FireResetEnv`, `ClipRewardEnv`
+- `ResizeObservation`, `GrayscaleObservation`, `FrameStackObservation`, `RecordEpisodeStatistics`
+
+### Unified Ablation System
+
+The `run_ablations.py` script provides a unified system for running experiments across both environments:
+
+**Features:**
+- **Environment Detection**: Automatically selects correct script based on `environment` field
+- **Configurable Experiments**: Easy modification of experiment parameters via `ExperimentConfig` dataclass
+- **Progress Tracking**: Real-time progress display and failure handling
+- **Flexible Environment IDs**: Support for different games within each environment type
+
+**Configuration Structure:**
+```python
+@dataclass
+class ExperimentConfig:
+    name: str                    # Display name for experiment
+    run_name: str               # Run identifier for logging
+    ablation_mode: str          # "none", "frozen_clip", "random_encoder"
+    clip_lambda: float          # CLIP loss coefficient
+    apply_disturbances: bool    # Enable visual disturbances
+    disturbance_severity: str   # "MILD", "MODERATE", "HARD", "SEVERE"
+    description: str            # Human-readable description
+    environment: str            # "minigrid" or "atari"
+    env_id: str                # Specific environment ID
+```
+
+## Recent Updates and Fixes
+
+### Atari CLIP-PPO Implementation Completed
+
+The Atari implementation now includes all major features and fixes:
+
+**✅ Episode Logging Fixed (Critical)**
+- Fixed episodic return logging format for Atari environments
+- Corrected `infos` structure handling (`infos["episode"]["_r"]` boolean array format)
+- Episodes now properly logged to TensorBoard with `"charts/episodic_return"` and `"charts/episodic_length"` tags
+- Compatible with metrics analysis scripts
+
+**✅ Frozen CLIP Ablation Mode**
+- Agent constructor updated to accept `ablation_mode` and `clip_model` parameters
+- `_get_features()` method switches between learned CNN and frozen CLIP visual encoder
+- `get_frozen_clip_features()` handles both CLIP model types (VisionTransformer vs full CLIP)
+- Proper initialization order: CLIP model loaded before agent creation
+- RGB format conversion for CLIP compatibility
+
+**✅ Game-Specific RAM State Descriptions**
+- `generate_breakout_descriptions()`: Score, ball/paddle positions, contextual game state
+- `generate_pong_descriptions()`: Player/computer scores, ball/paddle positions, movement context
+- `generate_atari_descriptions()`: Dispatcher function supporting multiple Atari games
+- Robust fallback system for RAM access failures
+
+**✅ All Three Ablation Modes Supported**
+- **NONE**: Standard PPO with learned CNN + CLIP text alignment loss
+- **FROZEN_CLIP**: Uses frozen CLIP visual encoder instead of learned CNN (no alignment loss)
+- **RANDOM_ENCODER**: Uses learned CNN + random embeddings for alignment (control experiment)
+
+**✅ Unified Ablation Runner**
+- `run_ablations.py` supports both MiniGrid and Atari experiments
+- Environment detection based on `environment` field
+- Configurable environment IDs (`env_id` parameter)
+- Updated with comprehensive Atari experiment configurations
+
+### Technical Implementation Details
+
+**Agent Architecture Updates:**
+```python
+class Agent(nn.Module):
+    def __init__(self, envs, ablation_mode=None, clip_model=None):
+        # Supports both standard CNN and frozen CLIP modes
+        if ablation_mode == AblationMode.FROZEN_CLIP:
+            self.network = nn.Sequential(nn.Identity())  # Placeholder
+        else:
+            self.network = standard_cnn_architecture()
+    
+    def _get_features(self, x):
+        if self.ablation_mode == AblationMode.FROZEN_CLIP:
+            # Use frozen CLIP visual encoder
+            rgb_frames = convert_atari_frames_for_clip(x)
+            rgb_frames = rgb_frames.permute(0, 3, 1, 2).float() / 255.0
+            return clip_ppo_utils.get_frozen_clip_features(rgb_frames, self.clip_model)
+        else:
+            return self.network(x / 255.0)
+```
+
+**CLIP Model Compatibility:**
+```python
+def get_frozen_clip_features(x, clip_model):
+    # Handle both VisionTransformer and full CLIP models
+    if type(clip_model) == clip.model.VisionTransformer:
+        features = clip_model(x)
+    else:
+        features = clip_model.encode_image(x)
+    return features.float()
+```
+
+**Complete Ablation Study Configuration:**
+The system now supports comprehensive ablation studies with:
+- Clean vs disturbed environments
+- All three ablation modes per environment type
+- Configurable disturbance severity levels
+- Both MiniGrid and Atari environments
+- Unified experiment runner with progress tracking

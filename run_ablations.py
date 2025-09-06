@@ -21,6 +21,8 @@ class ExperimentConfig:
     apply_disturbances: bool
     disturbance_severity: str
     description: str
+    environment: str = "minigrid"  # "minigrid" or "atari"
+    env_id: str = "BreakoutNoFrameskip-v4"  # Environment ID
 
 
 def run_experiment(config: ExperimentConfig, base_args: List[str]):
@@ -30,14 +32,20 @@ def run_experiment(config: ExperimentConfig, base_args: List[str]):
     print(f"Description: {config.description}")
     print(f"{'='*60}")
     
-    # Build command
+    # Build command with new config structure
+    if config.environment == "atari":
+        script_path = "atari_experiments/clip_ppo/clip_ppo_atari.py"
+    else:  # minigrid
+        script_path = "minigrid_experiments/clip_ppo/clip_ppo_minigrid.py"
+        
     cmd = [
-        "python", "minigrid_experiments/clip_ppo/clip_ppo_minigrid.py",
+        "python", script_path,
+        "--env-id", config.env_id,
         "--run-name", config.run_name,
-        "--ablation-mode", config.ablation_mode.upper(),
-        "--clip-lambda", str(config.clip_lambda),
-        "--disturbance-severity", config.disturbance_severity,
-    ] + base_args + (['--apply-disturbances'] if config.apply_disturbances else [])
+        "--clip-config.ablation-mode", config.ablation_mode.upper(),
+        "--clip-config.clip-lambda", str(config.clip_lambda),
+        "--clip-config.disturbance-severity", config.disturbance_severity,
+    ] + base_args + (['--clip-config.apply-disturbances'] if config.apply_disturbances else [])
     
     print(f"Command: {' '.join(cmd)}")
     print(f"Starting at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -65,73 +73,161 @@ def main():
     
     # Base arguments shared across all experiments
     base_args = [
-        "--total-timesteps", "750000",  # 1M timesteps for meaningful results
-        "--env-id", "MiniGrid-Fetch-8x8-N3-v0",
+        "--total-timesteps", "250000",  # 1M timesteps for meaningful results
         "--seed", "42",
         "--save-model",
         "--save-freq", "250000",  # Save every 250k steps
     ]
     
     # Define experiments
+
+    # Minigrid experiments
+    # experiments = [
+    #     ExperimentConfig(
+    #         name="'Minigrid Clean PPO",
+    #         run_name="ppo_clean",
+    #         ablation_mode="none",
+    #         clip_lambda=0.0,
+    #         apply_disturbances=False,
+    #         disturbance_severity="NONE",  # Unused when disturbances disabled
+    #         description="Baseline PPO without disturbances",
+    #         environment="minigrid",
+    #         env_id="MiniGrid-Fetch-8x8-N3-v0"
+    #     ),
+        
+    #     ExperimentConfig(
+    #         name="Minigrid Clean CLIP-PPO", 
+    #         run_name="clip_ppo_clean",
+    #         ablation_mode="none",
+    #         clip_lambda=0.00001,
+    #         apply_disturbances=False,
+    #         disturbance_severity="NONE",  # Unused when disturbances disabled
+    #         description="CLIP-PPO without disturbances",
+    #         environment="minigrid",
+    #         env_id="MiniGrid-Fetch-8x8-N3-v0"
+    #     ),
+        
+    #     ExperimentConfig(
+    #         name="Minigrid PPO Hard Disturbance",
+    #         run_name="ppo_hard",
+    #         ablation_mode="none", 
+    #         clip_lambda=0.0,
+    #         apply_disturbances=True,
+    #         disturbance_severity="SEVERE",
+    #         description="Baseline PPO with hard visual disturbances",
+    #         environment="minigrid",
+    #         env_id="MiniGrid-Fetch-8x8-N3-v0"
+    #     ),
+        
+    #     ExperimentConfig(
+    #         name="Minigrid CLIP-PPO Hard Disturbance",
+    #         run_name="clip_ppo_hard",
+    #         ablation_mode="none",
+    #         clip_lambda=0.00001,
+    #         apply_disturbances=True,
+    #         disturbance_severity="SEVERE",
+    #         description="CLIP-PPO with hard visual disturbances",
+    #         environment="minigrid",
+    #         env_id="MiniGrid-Fetch-8x8-N3-v0"
+    #     ),
+        
+    #     ExperimentConfig(
+    #         name="Minigrid Random Encoder Hard Disturbance",
+    #         run_name="clip_ppo_random_encoder_hard",
+    #         ablation_mode="random_encoder",
+    #         clip_lambda=0.00001,  # Same lambda but random embeddings
+    #         apply_disturbances=True,
+    #         disturbance_severity="SEVERE",
+    #         description="Random encoder ablation with hard disturbances",
+    #         environment="minigrid",
+    #         env_id="MiniGrid-Fetch-8x8-N3-v0"
+    #     ),
+        
+        # ExperimentConfig(
+        #     name="Minigrid Frozen CLIP Hard Disturbance",
+        #     run_name="clip_ppo_frozen_clip_hard", 
+        #     ablation_mode="frozen_clip",
+        #     clip_lambda=0.00001,  # Lambda doesn't matter (disabled for frozen)
+        #     apply_disturbances=True,
+        #     disturbance_severity="HARD",
+        #     description="Frozen CLIP encoder ablation with hard disturbances",
+        #     environment="minigrid",
+        #     env_id="MiniGrid-Fetch-8x8-N3-v0"
+        # ),
+    # ]
+
+    # Atari experimetns
     experiments = [
         ExperimentConfig(
-            name="Clean PPO",
+            name="Atari Clean PPO",
             run_name="ppo_clean",
             ablation_mode="none",
             clip_lambda=0.0,
             apply_disturbances=False,
             disturbance_severity="NONE",  # Unused when disturbances disabled
-            description="Baseline PPO without disturbances"
+            description="Baseline PPO without disturbances",
+            environment="atari",
+            env_id="BreakoutNoFrameskip-v4"
         ),
         
         ExperimentConfig(
-            name="Clean CLIP-PPO", 
+            name="Atari Clean CLIP-PPO", 
             run_name="clip_ppo_clean",
             ablation_mode="none",
             clip_lambda=0.00001,
             apply_disturbances=False,
             disturbance_severity="NONE",  # Unused when disturbances disabled
-            description="CLIP-PPO without disturbances"
+            description="CLIP-PPO without disturbances",
+            environment="atari",
+            env_id="BreakoutNoFrameskip-v4"
         ),
         
         ExperimentConfig(
-            name="PPO Hard Disturbance",
+            name="Atari PPO Hard Disturbance",
             run_name="ppo_hard",
             ablation_mode="none", 
             clip_lambda=0.0,
             apply_disturbances=True,
-            disturbance_severity="HARD",
-            description="Baseline PPO with hard visual disturbances"
+            disturbance_severity="SEVERE",
+            description="Baseline PPO with hard visual disturbances",
+            environment="atari",
+            env_id="BreakoutNoFrameskip-v4"
         ),
         
         ExperimentConfig(
-            name="CLIP-PPO Hard Disturbance",
+            name="Atari CLIP-PPO Hard Disturbance",
             run_name="clip_ppo_hard",
             ablation_mode="none",
             clip_lambda=0.00001,
             apply_disturbances=True,
-            disturbance_severity="HARD",
-            description="CLIP-PPO with hard visual disturbances"
+            disturbance_severity="SEVERE",
+            description="CLIP-PPO with hard visual disturbances",
+            environment="atari",
+            env_id="BreakoutNoFrameskip-v4"
         ),
         
         ExperimentConfig(
-            name="Random Encoder Hard Disturbance",
+            name="Atari Random Encoder Hard Disturbance",
             run_name="clip_ppo_random_encoder_hard",
             ablation_mode="random_encoder",
             clip_lambda=0.00001,  # Same lambda but random embeddings
             apply_disturbances=True,
-            disturbance_severity="HARD",
-            description="Random encoder ablation with hard disturbances"
+            disturbance_severity="SEVERE",
+            description="Random encoder ablation with hard disturbances",
+            environment="atari",
+            env_id="BreakoutNoFrameskip-v4"
         ),
         
         ExperimentConfig(
-            name="Frozen CLIP Hard Disturbance",
+            name="Atari Frozen CLIP Hard Disturbance",
             run_name="clip_ppo_frozen_clip_hard", 
             ablation_mode="frozen_clip",
             clip_lambda=0.00001,  # Lambda doesn't matter (disabled for frozen)
             apply_disturbances=True,
             disturbance_severity="HARD",
-            description="Frozen CLIP encoder ablation with hard disturbances"
+            description="Frozen CLIP encoder ablation with hard disturbances",
+            environment="atari",
+            env_id="BreakoutNoFrameskip-v4"
         ),
     ]
     

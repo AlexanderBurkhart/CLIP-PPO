@@ -31,9 +31,9 @@ class ComparisonConfig:
     # AlgorithmConfig('CLIP_PPO', 'runs/old/clip_ppo_clean', ['runs/old/clip_ppo_hard']),
     algorithms: tuple = (
         AlgorithmConfig('PPO', 'runs/ppo_clean', ['runs/ppo_hard']),
-        # AlgorithmConfig('CLIP_PPO', 'runs/clip_ppo_clean', ['runs/clip_ppo_hard']),
-        # AlgorithmConfig('FROZEN', 'runs/clip_ppo_clean', ['runs/clip_ppo_frozen_clip_hard']),
-        # AlgorithmConfig('RANDOM', 'runs/clip_ppo_clean', ['runs/clip_ppo_random_encoder_hard'])
+        AlgorithmConfig('CLIP_PPO', 'runs/clip_ppo_clean', ['runs/clip_ppo_hard']),
+        AlgorithmConfig('FROZEN', 'runs/clip_ppo_clean', ['runs/clip_ppo_frozen_clip_hard']),
+        AlgorithmConfig('RANDOM', 'runs/clip_ppo_clean', ['runs/clip_ppo_random_encoder_hard'])
     )
     """List of algorithm configurations"""
 
@@ -356,7 +356,7 @@ if __name__ == "__main__":
     config = tyro.cli(ComparisonConfig)
 
     # Generate all comparison plots
-    # plot_ri_comparison_across_algorithms(config.algorithms)
-    # plot_learning_curves_comparison(config.algorithms)
+    plot_ri_comparison_across_algorithms(config.algorithms)
+    plot_learning_curves_comparison(config.algorithms)
     plot_success_rate_comparison(config.algorithms)
-    # plot_robustness_curves_comparison(config.algorithms, all_levels=True)  # All disturbance levels
+    plot_robustness_curves_comparison(config.algorithms, all_levels=True)  # All disturbance levels
