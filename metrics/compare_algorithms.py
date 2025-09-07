@@ -8,8 +8,8 @@ import numpy as np
 import tyro
 import os
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
-from disturbances import DisturbanceSeverity
+# Add root directory to Python path so 'shared' module can be found
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from calculate_metrics import get_disturbance_severity, compute_robustness_index, compute_robustness_index_over_time, load_tensorboard_run, compute_final_success_rate
 
 
@@ -30,9 +30,9 @@ class ComparisonConfig:
     # AlgorithmConfig('PPO', 'runs/old/ppo_clean', ['runs/old/ppo_hard']),
     # AlgorithmConfig('CLIP_PPO', 'runs/old/clip_ppo_clean', ['runs/old/clip_ppo_hard']),
     algorithms: tuple = (
-        AlgorithmConfig('PPO', 'runs/4_freq/ppo_l0.0_NONE_MiniGrid-FourRooms-v0_s42', ['runs/4_freq/ppo_l0.0_HARD_MiniGrid-FourRooms-v0_s42']),
-        AlgorithmConfig('CLIP_PPO', 'runs/4_freq/clip_ppo_l1e-05_NONE_MiniGrid-FourRooms-v0_s42', ['runs/4_freq/clip_ppo_l1e-05_HARD_MiniGrid-FourRooms-v0_s42']),
-        # AlgorithmConfig('FROZEN', 'runs/clip_ppo_frozen_clip_clean', ['runs/clip_ppo_frozen_clip_hard']),
+        AlgorithmConfig('PPO', 'runs/minigrid_PPO_CLEAN_MiniGrid-FourRooms-v0_s0', ['runs/minigrid_PPO_MODERATE_MiniGrid-FourRooms-v0_s0', 'runs/minigrid_PPO_SEVERE_MiniGrid-FourRooms-v0_s0']),
+        AlgorithmConfig('CLIP_PPO', 'runs/minigrid_CLIPPPO_CLEAN_l1e-5_MiniGrid-FourRooms-v0_s0', ['runs/minigrid_CLIPPPO_MODERATE_l1e-5_MiniGrid-FourRooms-v0_s0', 'runs/minigrid_CLIPPPO_SEVERE_l1e-5_MiniGrid-FourRooms-v0_s0']),
+        AlgorithmConfig('FROZEN', 'runs/minigrid_PPOFROZENCLIP_CLEAN_MiniGrid-FourRooms-v0_s0', []),
         # AlgorithmConfig('RANDOM', 'runs/clip_ppo_random_encoder_clean', ['runs/clip_ppo_random_encoder_hard'])
     )
     """List of algorithm configurations"""
@@ -240,29 +240,29 @@ def plot_success_rate_comparison(algorithms: List[AlgorithmConfig]):
     plt.tight_layout()
     plt.show(block=True)
     
-    # Print summary table
-    print(f"\n{'='*60}")
-    print(f"SUCCESS RATE COMPARISON SUMMARY")
-    print(f"{'='*60}")
-    header = f"{'Algorithm':<15} | {'Clean':<8}"
-    for severity in severities:
-        header += f" | {severity:<8}"
-    print(header)
-    print("-" * len(header))
+    # # Print summary table
+    # print(f"\n{'='*60}")
+    # print(f"SUCCESS RATE COMPARISON SUMMARY")
+    # print(f"{'='*60}")
+    # header = f"{'Algorithm':<15} | {'Clean':<8}"
+    # for severity in severities:
+    #     header += f" | {severity:<8}"
+    # print(header)
+    # print("-" * len(header))
     
-    for alg_idx, alg in enumerate(algorithms):
-        row = f"{alg.name:<15} | {clean_success_rates[alg_idx]:6.1f}%"
+    # for alg_idx, alg in enumerate(algorithms):
+    #     row = f"{alg.name:<15} | {clean_success_rates[alg_idx]:6.1f}%"
         
-        for severity_name in severities:
-            success_rate = 0.0
-            for disturbed_path in alg.disturbed_run_paths:
-                run_severity = get_disturbance_severity(disturbed_path)
-                if run_severity.value.upper() == severity_name:
-                    success_rate = compute_final_success_rate(disturbed_path)
-                    break
-            row += f" | {success_rate:6.1f}%"
+    #     for severity_name in severities:
+    #         success_rate = 0.0
+    #         for disturbed_path in alg.disturbed_run_paths:
+    #             run_severity = get_disturbance_severity(disturbed_path)
+    #             if run_severity.value.upper() == severity_name:
+    #                 success_rate = compute_final_success_rate(disturbed_path)
+    #                 break
+    #         row += f" | {success_rate:6.1f}%"
         
-        print(row)
+    #     print(row)
 
 
 def plot_robustness_curves_comparison(algorithms: List[AlgorithmConfig], disturbance_level: str = None, all_levels: bool = False):
@@ -356,7 +356,7 @@ if __name__ == "__main__":
     config = tyro.cli(ComparisonConfig)
 
     # Generate all comparison plots
-    plot_ri_comparison_across_algorithms(config.algorithms)
+    # plot_ri_comparison_across_algorithms(config.algorithms)
     plot_learning_curves_comparison(config.algorithms)
     plot_success_rate_comparison(config.algorithms)
-    plot_robustness_curves_comparison(config.algorithms, all_levels=True)  # All disturbance levels
+    # plot_robustness_curves_comparison(config.algorithms, all_levels=True)  # All disturbance levels

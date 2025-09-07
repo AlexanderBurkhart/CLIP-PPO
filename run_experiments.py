@@ -159,7 +159,7 @@ def _setup_main_experiments():
                 experiments.append(
                     ExperimentConfig(
                         name=f"{minigrid_environment} CLIP-PPO CLEAN lambda={l}",
-                        run_name=f"{minigrid_environment}_CLIPPPO_CLEAN_{env_id}_s{seed}",
+                        run_name=f"{minigrid_environment}_CLIPPPO_CLEAN_l{l}_{env_id}_s{seed}",
                         seed=seed,
                         ablation_mode=clip_ppo_utils.AblationMode.NONE,
                         clip_lambda=l,
@@ -174,7 +174,7 @@ def _setup_main_experiments():
                 experiments.append(
                     ExperimentConfig(
                             name=f"{minigrid_environment} CLIP-PPO MODERATE lambda={l}",
-                            run_name=f"{minigrid_environment}_CLIPPPO_MODERATE_{env_id}_s{seed}",
+                            run_name=f"{minigrid_environment}_CLIPPPO_MODERATE_l{l}_{env_id}_s{seed}",
                             seed=seed,
                             ablation_mode=clip_ppo_utils.AblationMode.NONE,
                             clip_lambda=l,
@@ -189,7 +189,7 @@ def _setup_main_experiments():
                 experiments.append(
                     ExperimentConfig(
                             name=f"{minigrid_environment} CLIP-PPO SEVERE lambda={l}",
-                            run_name=f"{minigrid_environment}_CLIPPPO_SEVERE_{env_id}_s{seed}",
+                            run_name=f"{minigrid_environment}_CLIPPPO_SEVERE_l{l}_{env_id}_s{seed}",
                             seed=seed,
                             ablation_mode=clip_ppo_utils.AblationMode.NONE,
                             clip_lambda=l,
@@ -289,7 +289,7 @@ def main():
     experiment_durations = []
     
 
-    start_at = 2
+    start_at = 18
     for i, config in enumerate(experiments, 1):
         if i < start_at: continue
         print(f"\n🚀 Starting experiment {i}/{len(experiments)}")

@@ -9,6 +9,9 @@ import seaborn as sns
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
 import tyro
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from calculate_metrics import compute_robustness_index_over_time
 
@@ -16,10 +19,18 @@ from calculate_metrics import compute_robustness_index_over_time
 @dataclass
 class EvaluationConfig:
     """Configuration for robustness evaluation."""
-    clean_run_path: str = 'runs/short_clip_ppo_clean'
+    clean_run_path: str = 'runs/minigrid_PPO_CLEAN_MiniGrid-FourRooms-v0_s0'
     """Path to clean (undisturbed) TensorBoard run directory"""
-    disturbed_run_path: str = 'runs/short_clip_ppo_hard'
+    disturbed_run_path: str = 'runs/minigrid_PPO_CLEAN_MiniGrid-FourRooms-v0_s0'
     """Path to disturbed TensorBoard run directory"""
+
+# @dataclass
+# class EvaluationConfig:
+#     """Configuration for robustness evaluation."""
+#     clean_run_path: str = 'runs/minigrid_PPOFROZENCLIP_CLEAN_MiniGrid-FourRooms-v0_s0'
+#     """Path to clean (undisturbed) TensorBoard run directory"""
+#     disturbed_run_path: str = 'runs/minigrid_PPOFROZENCLIP_CLEAN_MiniGrid-FourRooms-v0_s0'
+#     """Path to disturbed TensorBoard run directory"""
 
 
 def load_tensorboard_run(run_path: str) -> Tuple[List[int], List[float], List[float]]:

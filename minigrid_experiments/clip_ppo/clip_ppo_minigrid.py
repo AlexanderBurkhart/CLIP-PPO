@@ -49,7 +49,7 @@ class MiniGridClipPPOConfig(clip_ppo_utils.ClipPPOConfig):
     """Default ablation mode for MiniGrid experiments"""
     
     # Visual disturbance arguments - MiniGrid defaults
-    apply_disturbances: bool = True
+    apply_disturbances: bool = False
     """start with clean environment by default"""
     disturbance_severity: str = "MODERATE"
     """moderate disturbances work well for MiniGrid"""

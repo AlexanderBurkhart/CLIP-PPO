@@ -18,6 +18,11 @@ from torch.utils.tensorboard import SummaryWriter
 import ale_py
 
 # Import shared utilities
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# Import shared CLIP-PPO utilities
+shared_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'shared')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 import clip_ppo_utils
 import checkpoint_utils

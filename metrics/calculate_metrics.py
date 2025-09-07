@@ -123,7 +123,24 @@ def compute_robustness_index_over_time(clean_run_path: str, disturbed_run_path: 
         'disturbed_return': disturbed_df['rolling_mean']
     })
     
-    result_df['robustness_index'] = result_df['disturbed_return'] / result_df['clean_return']
+    # Filter out episodes where clean performance is too low for meaningful comparison
+    min_clean_threshold = 0.1  # Only compute RI where clean performance > threshold
+    valid_mask = result_df['clean_return'] > min_clean_threshold
+    
+    # Compute robustness index only for valid episodes
+    result_df['robustness_index'] = np.nan  # Initialize with NaN
+    result_df.loc[valid_mask, 'robustness_index'] = (
+        result_df.loc[valid_mask, 'disturbed_return'] / result_df.loc[valid_mask, 'clean_return']
+    )
+    
+    # For visualization purposes, forward-fill NaN values with the last valid value
+    result_df['robustness_index'] = result_df['robustness_index'].fillna(method='ffill')
+    
+    # If still NaN at the beginning, backward fill
+    result_df['robustness_index'] = result_df['robustness_index'].fillna(method='bfill')
+    
+    # If still all NaN, set to 0
+    result_df['robustness_index'] = result_df['robustness_index'].fillna(0)
     
     print(f"Final robustness index: {result_df['robustness_index'].iloc[-1]:.3f}")
     print(f"Mean robustness index: {result_df['robustness_index'].mean():.3f}")
