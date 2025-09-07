@@ -453,7 +453,7 @@ if __name__ == "__main__":
     # Initialize disturbance wrapper if enabled
     disturber = None
     if args.clip_config.apply_disturbances:
-        severity = DisturbanceSeverity(args.clip_config.disturbance_severity.lower())
+        severity = getattr(DisturbanceSeverity, args.clip_config.disturbance_severity)
         disturber = DisturbanceWrapper(severity=severity)
         print(f"Disturbances enabled with severity: {args.clip_config.disturbance_severity}")
     else:
