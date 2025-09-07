@@ -222,46 +222,46 @@ def _setup_main_experiments():
     ATARI GENERATIONS
     """
     # Reduced environments for ablations - just need representative examples
-    atari_environment = 'atari'
-    atari_environments = [
-        'ALE/Breakout-v5',
-        'ALE/Pong-v5',
-        'ALE/Seaquest-v5'
-    ]
+    # atari_environment = 'atari'
+    # atari_environments = [
+    #     'ALE/Breakout-v5',
+    #     'ALE/Pong-v5',
+    #     'ALE/Seaquest-v5'
+    # ]
     
-    for seed in seeds:
-        for env_id in atari_environments:
-            experiments.append(
-                ExperimentConfig(
-                    name=f"{atari_environment} PPO CLEAN",
-                    run_name=f"{atari_environment}_PPO_CLEAN_{env_id.replace('/', '')}_s{seed}",
-                    seed=seed,
-                    ablation_mode=clip_ppo_utils.AblationMode.NONE,
-                    clip_lambda=0.0,
-                    apply_disturbances=False,
-                    disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-                    description=f"{atari_environment} PPO CLEAN {env_id} seed={seed}",
-                    environment=atari_environment,
-                    env_id=env_id,
-                    timesteps=timesteps[atari_environment],
-                )
-            )
+    # for seed in seeds:
+    #     for env_id in atari_environments:
+    #         experiments.append(
+    #             ExperimentConfig(
+    #                 name=f"{atari_environment} PPO CLEAN",
+    #                 run_name=f"{atari_environment}_PPO_CLEAN_{env_id.replace('/', '')}_s{seed}",
+    #                 seed=seed,
+    #                 ablation_mode=clip_ppo_utils.AblationMode.NONE,
+    #                 clip_lambda=0.0,
+    #                 apply_disturbances=False,
+    #                 disturbance_severity=disturbances.DisturbanceSeverity.NONE,
+    #                 description=f"{atari_environment} PPO CLEAN {env_id} seed={seed}",
+    #                 environment=atari_environment,
+    #                 env_id=env_id,
+    #                 timesteps=timesteps[atari_environment],
+    #             )
+    #         )
 
-            experiments.append(
-                ExperimentConfig(
-                    name=f"{atari_environment} PPO FROZEN CLIP CLEAN",
-                    run_name=f"{atari_environment}_PPOFROZENCLIP_CLEAN_{env_id.replace('/', '')}_s{seed}",
-                    seed=seed,
-                    ablation_mode=clip_ppo_utils.AblationMode.FROZEN_CLIP,
-                    clip_lambda=0.0,
-                    apply_disturbances=False,
-                    disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-                    description=f"{atari_environment} PPOFROZENCLIP CLEAN {env_id} seed={seed}",
-                    environment=atari_environment,
-                    env_id=env_id,
-                    timesteps=timesteps[atari_environment],
-                )
-            )
+    #         experiments.append(
+    #             ExperimentConfig(
+    #                 name=f"{atari_environment} PPO FROZEN CLIP CLEAN",
+    #                 run_name=f"{atari_environment}_PPOFROZENCLIP_CLEAN_{env_id.replace('/', '')}_s{seed}",
+    #                 seed=seed,
+    #                 ablation_mode=clip_ppo_utils.AblationMode.FROZEN_CLIP,
+    #                 clip_lambda=0.0,
+    #                 apply_disturbances=False,
+    #                 disturbance_severity=disturbances.DisturbanceSeverity.NONE,
+    #                 description=f"{atari_environment} PPOFROZENCLIP CLEAN {env_id} seed={seed}",
+    #                 environment=atari_environment,
+    #                 env_id=env_id,
+    #                 timesteps=timesteps[atari_environment],
+    #             )
+    #         )
 
 
     print(f"Generated {len(experiments)} total experiment combinations")
@@ -288,7 +288,10 @@ def main():
     total_start_time = time.time()
     experiment_durations = []
     
+
+    start_at = 2
     for i, config in enumerate(experiments, 1):
+        if i < start_at: continue
         print(f"\n🚀 Starting experiment {i}/{len(experiments)}")
         
         # Dynamic time estimation

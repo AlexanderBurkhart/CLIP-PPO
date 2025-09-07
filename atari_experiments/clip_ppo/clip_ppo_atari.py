@@ -21,7 +21,8 @@ import ale_py
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
 import clip_ppo_utils
 import checkpoint_utils
-from disturbances import DisturbanceWrapper, DisturbanceSeverity
+from shared.disturbances_gpu import DisturbanceWrapperGPU
+from shared.disturbance_types import DisturbanceSeverity
 
 # Import atari wrappers from parent directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -454,7 +455,7 @@ if __name__ == "__main__":
     disturber = None
     if args.clip_config.apply_disturbances:
         severity = getattr(DisturbanceSeverity, args.clip_config.disturbance_severity)
-        disturber = DisturbanceWrapper(severity=severity)
+        disturber = DisturbanceWrapperGPU(device=device, severity=severity)
         print(f"Disturbances enabled with severity: {args.clip_config.disturbance_severity}")
     else:
         print("Disturbances disabled")
@@ -508,17 +509,13 @@ if __name__ == "__main__":
         for step in range(0, args.num_steps):
             global_step += args.num_envs
             
-            # Apply disturbances if enabled
+            # Apply disturbances if enabled (GPU batch processing)
             if disturber:
-                # Convert entire batch to numpy once, apply disturbances, convert back
-                next_obs_np = next_obs.cpu().numpy()  # [8, 4, 84, 84]
-                # Reshape from [8, 4, 84, 84] to [8, 84, 84, 4] for disturbance wrapper
-                next_obs_reshaped = next_obs_np.transpose(0, 2, 3, 1)  # [8, 84, 84, 4]
-                for env_idx in range(args.num_envs):
-                    next_obs_reshaped[env_idx] = disturber.apply_disturbances(next_obs_reshaped[env_idx])
-                # Reshape back from [8, 84, 84, 4] to [8, 4, 84, 84]
-                next_obs_np = next_obs_reshaped.transpose(0, 3, 1, 2)  # [8, 4, 84, 84]
-                next_obs = torch.from_numpy(next_obs_np).to(device)
+                # Normalize to [0,1] and apply disturbances (already in [B, C, H, W] format)
+                next_obs_float = next_obs.float() / 255.0
+                disturbed_obs = disturber.apply_disturbances(next_obs_float)
+                # Denormalize back to uint8
+                next_obs = (disturbed_obs * 255.0).byte()
             
             obs[step] = next_obs
             dones[step] = next_done

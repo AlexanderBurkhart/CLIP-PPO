@@ -28,7 +28,8 @@ shared_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 sys.path.insert(0, shared_path)
 import clip_ppo_utils
 import checkpoint_utils
-from disturbances import DisturbanceWrapper, DisturbanceSeverity
+from shared.disturbances_gpu import DisturbanceWrapperGPU
+from shared.disturbance_types import DisturbanceSeverity
 
 
 @dataclass
@@ -36,7 +37,7 @@ class MiniGridClipPPOConfig(clip_ppo_utils.ClipPPOConfig):
     """MiniGrid-specific CLIP-PPO configuration with environment-specific defaults."""
     
     # CLIP specific arguments - MiniGrid defaults
-    clip_lambda: float = 0.00001
+    clip_lambda: float = 0.0#0001
     """coefficient for CLIP alignment loss - good default for MiniGrid"""
     clip_model: str = "ViT-B/32"
     """CLIP model variant - standard choice"""
@@ -48,7 +49,7 @@ class MiniGridClipPPOConfig(clip_ppo_utils.ClipPPOConfig):
     """Default ablation mode for MiniGrid experiments"""
     
     # Visual disturbance arguments - MiniGrid defaults
-    apply_disturbances: bool = False
+    apply_disturbances: bool = True
     """start with clean environment by default"""
     disturbance_severity: str = "MODERATE"
     """moderate disturbances work well for MiniGrid"""
@@ -331,7 +332,7 @@ if __name__ == "__main__":
     disturber = None
     if args.clip_config.apply_disturbances:
         severity = getattr(DisturbanceSeverity, args.clip_config.disturbance_severity)
-        disturber = DisturbanceWrapper(seed=args.seed, severity=severity)
+        disturber = DisturbanceWrapperGPU(device=device, seed=args.seed, severity=severity)
         print(f"Disturbances enabled with severity: {args.clip_config.disturbance_severity}")
     else:
         print("Disturbances disabled")
@@ -377,13 +378,14 @@ if __name__ == "__main__":
         for step in range(0, args.num_steps):
             global_step += args.num_envs
             
-            # Apply visual disturbances to next_obs if enabled (following CleanRL pattern)
+            # Apply visual disturbances to next_obs if enabled (GPU batch processing)
             if disturber:
-                # Convert entire batch to numpy once, apply disturbances, convert back
-                next_obs_np = next_obs.cpu().numpy()
-                for env_idx in range(args.num_envs):
-                    next_obs_np[env_idx] = disturber.apply_disturbances(next_obs_np[env_idx])
-                next_obs = torch.from_numpy(next_obs_np).to(device)
+                # Normalize to [0,1] and convert to [B, C, H, W] format
+                next_obs_float = next_obs.float() / 255.0
+                next_obs_chw = next_obs_float.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+                disturbed_obs = disturber.apply_disturbances(next_obs_chw)
+                # Convert back to [B, H, W, C] format and denormalize to uint8
+                next_obs = (disturbed_obs.permute(0, 2, 3, 1) * 255.0).byte()
             
             obs[step] = next_obs
             dones[step] = next_done

@@ -9,7 +9,8 @@ import tyro
 from dataclasses import dataclass
 from typing import Optional
 import os
-from disturbances import DisturbanceWrapper, DisturbanceSeverity
+from disturbances_gpu import create_disturbance_wrapper
+from disturbances import DisturbanceSeverity
 
 
 @dataclass
@@ -98,6 +99,8 @@ def show_side_by_side(original: np.ndarray, disturbed: np.ndarray, window_name: 
         window_name: Window title
     """
     # Concatenate images horizontally
+    if hasattr(disturbed, 'cpu'):
+        disturbed = disturbed.cpu().numpy()
     combined = np.hstack([original, disturbed])
     
     # Add text labels
@@ -132,21 +135,6 @@ def apply_and_show_disturbance(image: np.ndarray, disturbance_name: str,
     cv2.waitKey(args.display_time)
 
 
-def apply_configured_disturbances(image: np.ndarray, 
-                                disturber: DisturbanceWrapper) -> np.ndarray:
-    """
-    Apply all disturbances using the wrapper's apply_disturbances method.
-    
-    Args:
-        image: Input image
-        disturber: Disturbance wrapper instance
-        
-    Returns:
-        Image with applied disturbances
-    """
-    return disturber.apply_disturbances(image.copy())
-
-
 def main():
     """Main function for disturbance testing."""
     args = tyro.cli(DisturbanceTestArgs)
@@ -164,7 +152,8 @@ def main():
         return
     
     # Create disturbance wrapper with severity or custom parameters
-    disturber = DisturbanceWrapper(
+    disturber = create_disturbance_wrapper(
+        use_gpu=True,
         seed=args.seed, 
         severity=args.severity,
         gaussian_noise_sigma=args.gaussian_noise_sigma,
@@ -178,7 +167,7 @@ def main():
         apply_and_show_disturbance(
             image,
             "Gaussian Noise",
-            disturber.apply_gaussian_noise,
+            disturber.apply_gaussian_noise_numpy,
             args
         )
     
@@ -186,7 +175,7 @@ def main():
         apply_and_show_disturbance(
             image,
             "Contrast Jitter",
-            disturber.apply_contrast_jitter,
+            disturber.apply_contrast_jitter_numpy,
             args
         )
     
@@ -194,7 +183,7 @@ def main():
         apply_and_show_disturbance(
             image,
             "Gaussian Blur",
-            disturber.apply_gaussian_blur,
+            disturber.apply_gaussian_blur_numpy,
             args
         )
     
@@ -202,13 +191,13 @@ def main():
         apply_and_show_disturbance(
             image,
             "Cutout",
-            disturber.apply_cutout,
+            disturber.apply_cutout_numpy,
             args
         )
     
     # Apply and display combined disturbances
     print("\nApplying combined disturbances...")
-    combined_image = apply_configured_disturbances(image, disturber)
+    combined_image = disturber.apply_disturbances_numpy(image)
     show_side_by_side(image, combined_image, "Combined Disturbances")
     
     print("\nPress any key to close all windows...")
