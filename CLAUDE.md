@@ -840,11 +840,33 @@ The system now supports comprehensive ablation studies with:
 
 ### Critical Bugs Fixed
 
-**1. Disturbance Wrapper Integration for Atari**
-- **Issue**: Disturbances weren't being applied to Atari observations due to tensor format mismatch
-- **Root Cause**: Atari observations are `[batch, 4, 84, 84]` (channels-first) but disturbance wrapper expects `[batch, 84, 84, 4]` (channels-last) 
-- **Fix**: Added proper tensor reshaping with `transpose(0, 2, 3, 1)` before disturbance application and `transpose(0, 3, 1, 2)` after
-- **Location**: `atari_experiments/clip_ppo/clip_ppo_atari.py` lines 514-521
+**1. Multi-Frame CLIP Processing and Temporal Understanding**
+- **Issue**: Need for temporal understanding in both frozen CLIP encoder and image modality CLIP alignment
+- **Solution**: Implemented concatenation + projection approach for 4-frame temporal sequences
+- **Benefits**: Preserves temporal order unlike averaging, learns optimal frame combinations through linear projection
+- **Architecture**: Shared `temporal_projection` layer (4×512 → 512) for both frozen CLIP and image modality cases
+
+**2. Computational Graph Conflicts**
+- **Issue**: "Backward through graph a second time" errors when using same projection layer in multiple paths
+- **Root Cause**: CLIP embeddings precomputed once then indexed across minibatches, causing graph reuse
+- **Fix**: Precompute CLIP encoder output with `torch.no_grad()`, apply projection per minibatch to build fresh graphs
+- **Result**: Eliminated need for `retain_graph=True`, clean backpropagation
+
+**3. Disturbance Wrapper Integration for Atari**
+- **Issue**: Torchvision transforms expect 1 or 3 channels, but Atari uses 4-channel frame stacks
+- **Fix**: Apply disturbances to each frame individually, then recombine frames
+
+### Performance Optimizations
+
+**1. Batched Multi-Frame CLIP Processing**
+- **Previous**: Process each frame separately in loop (4 forward passes per batch)
+- **Optimized**: Reshape and process all frames in single batch (`batch*num_frames` forward pass)
+- **Result**: ~4x speedup for CLIP embedding generation
+
+**2. Efficient Gradient Flow**
+- **Architecture**: Clean separation between frozen CLIP encoder (no grad) and learnable projection (with grad)
+- **Checkpoint Handling**: Proper save/load of shared temporal projection layer
+- **Memory**: No `retain_graph=True` needed, standard PyTorch memory management
 
 **2. Checkpoint Resumption Bug**
 - **Issue**: Training loop always started from iteration 1 instead of using loaded checkpoint iteration

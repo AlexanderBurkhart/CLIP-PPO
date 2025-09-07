@@ -17,14 +17,12 @@ from shared import clip_ppo_utils
 @dataclass
 class ExperimentConfig:
     """Configuration for a single experiment."""
-    name: str
     run_name: str
     seed: int
     ablation_mode: clip_ppo_utils.AblationMode
     clip_lambda: float
     apply_disturbances: bool
     disturbance_severity: disturbances.DisturbanceSeverity
-    description: str
     timesteps: int
     environment: str = "minigrid"  # "minigrid" or "atari"
     env_id: str = "BreakoutNoFrameskip-v4"  # Environment ID
@@ -36,12 +34,11 @@ def run_experiment(config: ExperimentConfig):
     base_args = [
         "--save-model",
         "--save-freq", "250000",  # Save every 250k steps
-        "--clip-config.clip_modality", "text"
+        "--clip-config.clip_modality", "image"
     ]
 
     print(f"\n{'='*60}")
-    print(f"Running: {config.name}")
-    print(f"Description: {config.description}")
+    print(f"Running: {config.run_name}")
     print(f"{'='*60}")
     
     # Build command with new config structure
@@ -70,15 +67,15 @@ def run_experiment(config: ExperimentConfig):
         # Run experiment
         result = subprocess.run(cmd, check=True, capture_output=False)
         duration = time.time() - start_time
-        print(f"\n✅ {config.name} completed successfully in {duration/60:.1f} minutes")
+        print(f"\n✅ {config.run_name} completed successfully in {duration/60:.1f} minutes")
         return True
     except subprocess.CalledProcessError as e:
         duration = time.time() - start_time
-        print(f"\n❌ {config.name} failed after {duration/60:.1f} minutes")
+        print(f"\n❌ {config.run_name} failed after {duration/60:.1f} minutes")
         print(f"Error: {e}")
         return False
     except KeyboardInterrupt:
-        print(f"\n⚠️  {config.name} interrupted by user")
+        print(f"\n⚠️  {config.run_name} interrupted by user")
         return False
 
 
@@ -87,12 +84,12 @@ def _setup_main_experiments():
     
     seeds = (0, 42)
     timesteps = {
-        'minigrid': 5_000_000,
+        'minigrid': 1_000_000,
         'atari': 100_000,
     }
 
     """
-    CLIP_PPO and PPO GENERATIONS
+    CLIP_PPO and PPO GENERATIONS WITH CLEAN FROZENCLIP
     """
     # Configurations
     lambdas = (
@@ -100,57 +97,52 @@ def _setup_main_experiments():
         0.00001,   # 1e-5 (best result)
         0.0001,    # 1e-4 
     )
-    minigrid_environment = 'minigrid'
-    minigrid_environments = [
-        'MiniGrid-FourRooms-v0',  # Medium
-        'MiniGrid-DoorKey-16x16-v0',  # Hard
+    environment = 'atari'
+    environment_ids = [
+        'ALE/Breakout-v5',
+        'ALE/Pong-v5',
+        'ALE/Seaquest-v5'
     ]
     for seed in seeds:
-        for env_id in minigrid_environments:
+        for env_id in environment_ids:
             # PPO
             experiments.append(
                 ExperimentConfig(
-                        name=f"{minigrid_environment} PPO CLEAN",
-                        run_name=f"{minigrid_environment}_PPO_CLEAN_{env_id}_s{seed}",
+                        run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_PPO_CLEAN",
                         seed=seed,
                         ablation_mode=clip_ppo_utils.AblationMode.NONE,
                         clip_lambda=0.0,
                         apply_disturbances=False,
                         disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-                        description=f"{minigrid_environment} PPO NONE {env_id} seed={seed}",
-                        environment=minigrid_environment,
+                        environment=environment,
                         env_id=env_id,
-                        timesteps=timesteps[minigrid_environment],
+                        timesteps=timesteps[environment],
                     )
             )
             experiments.append(
                 ExperimentConfig(
-                        name=f"{minigrid_environment} PPO MODERATE",
-                        run_name=f"{minigrid_environment}_PPO_MODERATE_{env_id}_s{seed}",
+                        run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_PPO_MODERATE",
                         seed=seed,
                         ablation_mode=clip_ppo_utils.AblationMode.NONE,
                         clip_lambda=0.0,
                         apply_disturbances=True,
                         disturbance_severity=disturbances.DisturbanceSeverity.MODERATE,
-                        description=f"{minigrid_environment} PPO MODERATE {env_id} seed={seed}",
-                        environment=minigrid_environment,
+                        environment=environment,
                         env_id=env_id,
-                        timesteps=timesteps[minigrid_environment],
+                        timesteps=timesteps[environment],
                     )
             )
             experiments.append(
                 ExperimentConfig(
-                        name=f"{minigrid_environment} PPO SEVERE",
-                        run_name=f"{minigrid_environment}_PPO_SEVERE_{env_id}_s{seed}",
+                        run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_PPO_SEVERE",
                         seed=seed,
                         ablation_mode=clip_ppo_utils.AblationMode.NONE,
                         clip_lambda=0.0,
                         apply_disturbances=True,
                         disturbance_severity=disturbances.DisturbanceSeverity.SEVERE,
-                        description=f"{minigrid_environment} PPO SEVERE {env_id} seed={seed}",
-                        environment=minigrid_environment,
+                        environment=environment,
                         env_id=env_id,
-                        timesteps=timesteps[minigrid_environment],
+                        timesteps=timesteps[environment],
                     )
             )
 
@@ -158,110 +150,58 @@ def _setup_main_experiments():
             for l in lambdas:
                 experiments.append(
                     ExperimentConfig(
-                        name=f"{minigrid_environment} CLIP-PPO CLEAN lambda={l}",
-                        run_name=f"{minigrid_environment}_CLIPPPO_CLEAN_l{l}_{env_id}_s{seed}",
+                        run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_CLIPPPO_CLEAN_image_l{l}",
                         seed=seed,
                         ablation_mode=clip_ppo_utils.AblationMode.NONE,
                         clip_lambda=l,
                         apply_disturbances=False,
                         disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-                        description=f"{minigrid_environment} CLIP-PPO NONE {env_id} seed={seed}",
-                        environment=minigrid_environment,
+                        environment=environment,
                         env_id=env_id,
-                        timesteps=timesteps[minigrid_environment],
+                        timesteps=timesteps[environment],
                     )
                 )
                 experiments.append(
                     ExperimentConfig(
-                            name=f"{minigrid_environment} CLIP-PPO MODERATE lambda={l}",
-                            run_name=f"{minigrid_environment}_CLIPPPO_MODERATE_l{l}_{env_id}_s{seed}",
+                            run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_CLIPPPO_MODERATE_image_l{l}",
                             seed=seed,
                             ablation_mode=clip_ppo_utils.AblationMode.NONE,
                             clip_lambda=l,
                             apply_disturbances=True,
                             disturbance_severity=disturbances.DisturbanceSeverity.MODERATE,
-                            description=f"{minigrid_environment} PPO MODERATE {env_id} seed={seed}",
-                            environment=minigrid_environment,
+                            environment=environment,
                             env_id=env_id,
-                            timesteps=timesteps[minigrid_environment],
+                            timesteps=timesteps[environment],
                         )
                 )
                 experiments.append(
                     ExperimentConfig(
-                            name=f"{minigrid_environment} CLIP-PPO SEVERE lambda={l}",
-                            run_name=f"{minigrid_environment}_CLIPPPO_SEVERE_l{l}_{env_id}_s{seed}",
+                            run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_CLIPPPO_SEVERE_image_l{l}",
                             seed=seed,
                             ablation_mode=clip_ppo_utils.AblationMode.NONE,
                             clip_lambda=l,
                             apply_disturbances=True,
                             disturbance_severity=disturbances.DisturbanceSeverity.SEVERE,
-                            description=f"{minigrid_environment} PPO SEVERE {env_id} seed={seed}",
-                            environment=minigrid_environment,
+                            environment=environment,
                             env_id=env_id,
-                            timesteps=timesteps[minigrid_environment],
+                            timesteps=timesteps[environment],
                         )
                 )
 
             # Frozen encoder
             experiments.append(
                 ExperimentConfig(
-                    name=f"{minigrid_environment} PPO FROZEN CLIP CLEAN",
-                    run_name=f"{minigrid_environment}_PPOFROZENCLIP_CLEAN_{env_id}_s{seed}",
+                    run_name=f"s{seed}_{environment}_{env_id.replace('/', '')}_PPOFROZENCLIP_CLEAN",
                     seed=seed,
                     ablation_mode=clip_ppo_utils.AblationMode.FROZEN_CLIP,
                     clip_lambda=l,
                     apply_disturbances=False,
                     disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-                    description=f"{minigrid_environment} FROZENCLIPCLEAN CLEAN {env_id} seed={seed}",
-                    environment=minigrid_environment,
+                    environment=environment,
                     env_id=env_id,
-                    timesteps=timesteps[minigrid_environment],
+                    timesteps=timesteps[environment],
                 )
             )
-    """
-    ATARI GENERATIONS
-    """
-    # Reduced environments for ablations - just need representative examples
-    # atari_environment = 'atari'
-    # atari_environments = [
-    #     'ALE/Breakout-v5',
-    #     'ALE/Pong-v5',
-    #     'ALE/Seaquest-v5'
-    # ]
-    
-    # for seed in seeds:
-    #     for env_id in atari_environments:
-    #         experiments.append(
-    #             ExperimentConfig(
-    #                 name=f"{atari_environment} PPO CLEAN",
-    #                 run_name=f"{atari_environment}_PPO_CLEAN_{env_id.replace('/', '')}_s{seed}",
-    #                 seed=seed,
-    #                 ablation_mode=clip_ppo_utils.AblationMode.NONE,
-    #                 clip_lambda=0.0,
-    #                 apply_disturbances=False,
-    #                 disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-    #                 description=f"{atari_environment} PPO CLEAN {env_id} seed={seed}",
-    #                 environment=atari_environment,
-    #                 env_id=env_id,
-    #                 timesteps=timesteps[atari_environment],
-    #             )
-    #         )
-
-    #         experiments.append(
-    #             ExperimentConfig(
-    #                 name=f"{atari_environment} PPO FROZEN CLIP CLEAN",
-    #                 run_name=f"{atari_environment}_PPOFROZENCLIP_CLEAN_{env_id.replace('/', '')}_s{seed}",
-    #                 seed=seed,
-    #                 ablation_mode=clip_ppo_utils.AblationMode.FROZEN_CLIP,
-    #                 clip_lambda=0.0,
-    #                 apply_disturbances=False,
-    #                 disturbance_severity=disturbances.DisturbanceSeverity.NONE,
-    #                 description=f"{atari_environment} PPOFROZENCLIP CLEAN {env_id} seed={seed}",
-    #                 environment=atari_environment,
-    #                 env_id=env_id,
-    #                 timesteps=timesteps[atari_environment],
-    #             )
-    #         )
 
 
     print(f"Generated {len(experiments)} total experiment combinations")
@@ -289,7 +229,7 @@ def main():
     experiment_durations = []
     
 
-    start_at = 18
+    start_at = 0
     for i, config in enumerate(experiments, 1):
         if i < start_at: continue
         print(f"\n🚀 Starting experiment {i}/{len(experiments)}")
@@ -310,10 +250,10 @@ def main():
         exp_duration = time.time() - exp_start_time
         experiment_durations.append(exp_duration)
         
-        results[config.name] = success
+        results[config.run_name] = success
         
         if not success:
-            response = input(f"\nExperiment {config.name} failed. Continue with remaining experiments? (y/N): ")
+            response = input(f"\nExperiment {config.run_name} failed. Continue with remaining experiments? (y/N): ")
             if response.lower() != 'y':
                 print("Stopping experiments.")
                 break

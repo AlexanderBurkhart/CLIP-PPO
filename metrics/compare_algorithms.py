@@ -30,9 +30,9 @@ class ComparisonConfig:
     # AlgorithmConfig('PPO', 'runs/old/ppo_clean', ['runs/old/ppo_hard']),
     # AlgorithmConfig('CLIP_PPO', 'runs/old/clip_ppo_clean', ['runs/old/clip_ppo_hard']),
     algorithms: tuple = (
-        AlgorithmConfig('PPO', 'runs/minigrid_PPO_CLEAN_MiniGrid-FourRooms-v0_s0', ['runs/minigrid_PPO_MODERATE_MiniGrid-FourRooms-v0_s0', 'runs/minigrid_PPO_SEVERE_MiniGrid-FourRooms-v0_s0']),
-        AlgorithmConfig('CLIP_PPO', 'runs/minigrid_CLIPPPO_CLEAN_l1e-5_MiniGrid-FourRooms-v0_s0', ['runs/minigrid_CLIPPPO_MODERATE_l1e-5_MiniGrid-FourRooms-v0_s0', 'runs/minigrid_CLIPPPO_SEVERE_l1e-5_MiniGrid-FourRooms-v0_s0']),
-        AlgorithmConfig('FROZEN', 'runs/minigrid_PPOFROZENCLIP_CLEAN_MiniGrid-FourRooms-v0_s0', []),
+        AlgorithmConfig('PPO', 'runs/atari_PPO_CLEAN_ALEBreakout-v5_s0', ['runs/atari_PPO_MODERATE_ALEBreakout-v5_s0', 'runs/atari_PPO_SEVERE_ALEBreakout-v5_s0']),
+        AlgorithmConfig('CLIP_PPO', 'runs/atari_CLIPPPO_CLEAN_image_l1e-05_ALEBreakout-v5_s0', ['runs/atari_CLIPPPO_MODERATE_image_l1e-05_ALEBreakout-v5_s0', 'runs/atari_CLIPPPO_SEVERE_image_l1e-05_ALEBreakout-v5_s0']),
+        AlgorithmConfig('FROZEN', 'runs/atari_PPOFROZENCLIP_CLEAN_ALEBreakout-v5_s0', []),
         # AlgorithmConfig('RANDOM', 'runs/clip_ppo_random_encoder_clean', ['runs/clip_ppo_random_encoder_hard'])
     )
     """List of algorithm configurations"""
@@ -356,7 +356,7 @@ if __name__ == "__main__":
     config = tyro.cli(ComparisonConfig)
 
     # Generate all comparison plots
-    # plot_ri_comparison_across_algorithms(config.algorithms)
+    plot_ri_comparison_across_algorithms(config.algorithms)
     plot_learning_curves_comparison(config.algorithms)
     plot_success_rate_comparison(config.algorithms)
-    # plot_robustness_curves_comparison(config.algorithms, all_levels=True)  # All disturbance levels
+    plot_robustness_curves_comparison(config.algorithms, all_levels=True)  # All disturbance levels

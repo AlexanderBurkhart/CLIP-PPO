@@ -19,9 +19,9 @@ from calculate_metrics import compute_robustness_index_over_time
 @dataclass
 class EvaluationConfig:
     """Configuration for robustness evaluation."""
-    clean_run_path: str = 'runs/minigrid_PPO_CLEAN_MiniGrid-FourRooms-v0_s0'
+    clean_run_path: str = 'runs/minigrid_CLIPPPO_CLEAN_l1e-6_MiniGrid-DoorKey-16x16-v0_s0'
     """Path to clean (undisturbed) TensorBoard run directory"""
-    disturbed_run_path: str = 'runs/minigrid_PPO_CLEAN_MiniGrid-FourRooms-v0_s0'
+    disturbed_run_path: str = 'runs/minigrid_CLIPPPO_MODERATE_l1e-06_MiniGrid-DoorKey-16x16-v0_s0'
     """Path to disturbed TensorBoard run directory"""
 
 # @dataclass

@@ -50,7 +50,7 @@ class AtariClipPPOConfig(clip_ppo_utils.ClipPPOConfig):
     # Atari-specific CLIP defaults
     clip_lambda: float = 0.00001
     """coefficient for CLIP alignment loss"""
-    clip_modality: str = "text"
+    clip_modality: str = "image"
     """CLIP modality to use for alignment (image better for Atari visual scenes)"""
     ablation_mode: clip_ppo_utils.AblationMode = clip_ppo_utils.AblationMode.NONE
     """ablation mode for controlled experiments"""
@@ -175,14 +175,19 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Agent(nn.Module):
-    def __init__(self, envs, ablation_mode=None, clip_model=None):
+    def __init__(self, envs, ablation_mode=None, clip_model=None, clip_modality=None):
         super().__init__()
         self.ablation_mode = ablation_mode
         self.clip_model = clip_model
         
+        # Add shared temporal projection layer for both frozen CLIP encoder and image modality
+        if ablation_mode == clip_ppo_utils.AblationMode.FROZEN_CLIP or clip_modality == "image":
+            self.temporal_projection = layer_init(nn.Linear(4 * 512, 512))
+        else:
+            self.temporal_projection = None
+        
         if ablation_mode == clip_ppo_utils.AblationMode.FROZEN_CLIP:
             # Use frozen CLIP visual encoder instead of learned CNN
-            # CLIP outputs 512-dim features, so we can directly use them
             self.network = nn.Sequential(
                 nn.Identity()  # Placeholder - features come from CLIP
             )
@@ -207,9 +212,20 @@ class Agent(nn.Module):
         """Get features from either CNN or frozen CLIP."""
         if self.ablation_mode == clip_ppo_utils.AblationMode.FROZEN_CLIP:
             # Convert frame stack to RGB format for CLIP
-            rgb_frames = convert_atari_frames_for_clip(x)  # [batch, 3, 84, 84]
-            rgb_frames = rgb_frames.float() / 255.0  # [batch, 3, 84, 84]
-            return clip_ppo_utils.get_frozen_clip_features(rgb_frames, self.clip_model)
+            rgb_frames = convert_atari_frames_for_clip(x)  # [batch, 4, 3, 84, 84]
+            rgb_frames = rgb_frames.float() / 255.0
+            
+            # Process each frame through CLIP and concatenate features
+            frame_features = []
+            for frame_idx in range(4):
+                frame = rgb_frames[:, frame_idx, :, :, :]  # [batch, 3, 84, 84]
+                features = clip_ppo_utils.get_frozen_clip_features(frame, self.clip_model)
+                frame_features.append(features)
+            
+            # Concatenate to preserve temporal order: [batch, 4 * 512] = [batch, 2048]
+            concatenated = torch.cat(frame_features, dim=1)
+            # Project back to 512 dimensions for compatibility with actor/critic
+            return self.temporal_projection(concatenated)
         else:
             return self.network(x / 255.0)
 
@@ -238,15 +254,49 @@ def convert_atari_frames_for_clip(obs_batch):
         obs_batch: [batch_size, 4, 84, 84] grayscale frame stack
         
     Returns:
-        RGB images [batch_size, 3, 84, 84] suitable for CLIP preprocessing
+        RGB images [batch_size, 4, 3, 84, 84] - each frame converted to RGB
     """
-    # Take the most recent frame from the stack (last channel)
-    recent_frame = obs_batch[:, -1, :, :].unsqueeze(1)  # [batch, 1, 84, 84]
+    rgb_frames_list = []
     
-    # Convert grayscale to RGB by repeating across channels
-    rgb_frames = recent_frame.repeat(1, 3, 1, 1)  # [batch, 3, 84, 84]
+    # Process each frame in the stack
+    for frame_idx in range(4):
+        frame = obs_batch[:, frame_idx, :, :].unsqueeze(1)  # [batch, 1, 84, 84]
+        # Convert grayscale to RGB by repeating across channels
+        rgb_frame = frame.repeat(1, 3, 1, 1)  # [batch, 3, 84, 84]
+        rgb_frames_list.append(rgb_frame)
     
-    return rgb_frames
+    # Stack all frames: [batch, 4, 3, 84, 84]
+    return torch.stack(rgb_frames_list, dim=1)
+
+
+def process_multiframe_clip_embeddings(rgb_frames, clip_model, ablation_mode, modality, batch_size, device):
+    """
+    Process multi-frame Atari observations through CLIP embeddings and concatenate the results.
+    
+    Args:
+        rgb_frames: [batch, num_frames, 3, 84, 84] RGB frames
+        clip_model: CLIP model
+        ablation_mode: CLIP-PPO ablation mode
+        modality: "image" 
+        batch_size: batch size
+        device: torch device
+        
+    Returns:
+        torch.Tensor: [batch, num_frames*512] concatenated embeddings across frames
+    """
+    num_frames = rgb_frames.shape[1]  # Get number of frames (4 for Atari)
+    
+    # Reshape to process all frames in a single batch: [batch*num_frames, 3, 84, 84]
+    all_frames = rgb_frames.reshape(batch_size * num_frames, 3, 84, 84)
+    
+    # Process all frames at once
+    all_embeddings = clip_ppo_utils.generate_clip_embeddings(
+        ablation_mode, clip_model, modality=modality, batch_size=batch_size * num_frames, device=device, images=all_frames
+    )  # [batch*num_frames, 512]
+    
+    # Reshape back to separate frames and concatenate: [batch, num_frames, 512] -> [batch, num_frames*512]
+    frame_embeddings = all_embeddings.reshape(batch_size, num_frames, 512)
+    return frame_embeddings.reshape(batch_size, num_frames * 512)
 
 
 def generate_breakout_descriptions(envs, batch_size: int) -> list:
@@ -473,7 +523,7 @@ if __name__ == "__main__":
     ):
         clip_model = clip_ppo_utils.load_clip_model(args.clip_config.clip_model, device)
 
-    agent = Agent(envs, args.clip_config.ablation_mode, clip_model).to(device)
+    agent = Agent(envs, args.clip_config.ablation_mode, clip_model, args.clip_config.clip_modality).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Create checkpoint directory
@@ -493,8 +543,9 @@ if __name__ == "__main__":
     start_iteration = 1
     global_step = 0
     if args.resume_checkpoint:
+        extra_models = {'temporal_projection': agent.temporal_projection} if agent.temporal_projection else None
         start_iteration, global_step = checkpoint_utils.load_checkpoint(
-            args.resume_checkpoint, agent, optimizer, device
+            args.resume_checkpoint, agent, optimizer, device, extra_models
         )
         start_iteration += 1  # Start from next iteration
 
@@ -516,11 +567,21 @@ if __name__ == "__main__":
             
             # Apply disturbances if enabled (GPU batch processing)
             if disturber:
-                # Normalize to [0,1] and apply disturbances (already in [B, C, H, W] format)
+                # Normalize to [0,1] (already in [B, 4, H, W] format for Atari frame stack)
                 next_obs_float = next_obs.float() / 255.0
-                disturbed_obs = disturber.apply_disturbances(next_obs_float)
+                
+                # Apply disturbances to each frame separately since torchvision expects 1 or 3 channels
+                disturbed_frames = []
+                for frame_idx in range(4):  # 4 stacked frames
+                    frame = next_obs_float[:, frame_idx:frame_idx+1, :, :]  # [B, 1, H, W]
+                    disturbed_frame = disturber.apply_disturbances(frame)
+                    disturbed_frames.append(disturbed_frame)
+                
+                # Recombine frames back to [B, 4, H, W]
+                disturbed_obs = torch.cat(disturbed_frames, dim=1)
+                
                 # Denormalize back to uint8
-                next_obs = (disturbed_obs * 255.0).byte()
+                next_obs = disturbed_obs * 255.0
             
             obs[step] = next_obs
             dones[step] = next_done
@@ -578,8 +639,9 @@ if __name__ == "__main__":
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
 
-        # CLIP-PPO: Pre-compute CLIP embeddings once per iteration for efficiency
+        # CLIP-PPO: Pre-compute CLIP base features once per iteration for efficiency
         clip_embeddings = None
+        clip_embeddings_concat = None
         if clip_ppo_utils.should_compute_clip_loss(args.clip_config.ablation_mode, args.clip_config.clip_lambda):
             if args.clip_config.clip_modality == "text":
                 # Generate dynamic descriptions based on game metadata
@@ -595,15 +657,15 @@ if __name__ == "__main__":
             
             elif args.clip_config.clip_modality == "image":
                 # Convert Atari frames to RGB format for CLIP
-                rgb_images = convert_atari_frames_for_clip(b_obs)
-                clip_embeddings = clip_ppo_utils.generate_clip_embeddings(
-                    args.clip_config.ablation_mode,
-                    clip_model,
-                    modality=args.clip_config.clip_modality,
-                    batch_size=b_obs.shape[0],
-                    device=device,
-                    images=rgb_images
-                )
+                rgb_frames = convert_atari_frames_for_clip(b_obs)  # [batch, 4, 3, 84, 84]
+                rgb_frames = rgb_frames.float() / 255.0
+                
+                # Process all frames through CLIP and concatenate embeddings (no grad needed for CLIP encoder)
+                with torch.no_grad():
+                    clip_embeddings_concat = process_multiframe_clip_embeddings(
+                        rgb_frames, clip_model, args.clip_config.ablation_mode, 
+                        args.clip_config.clip_modality, b_obs.shape[0], device
+                    )  # [batch, 2048]
             else:
                 raise ValueError(f"Invalid CLIP modality: {args.clip_config.clip_modality}. Must be 'image' or 'text'")
 
@@ -659,7 +721,13 @@ if __name__ == "__main__":
                     and minibatch_counter % clip_ppo_utils.CLIP_LOSS_FREQUENCY == 0):
                     # Get PPO latent representations
                     ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
-                    mb_clip_embeddings = clip_embeddings[mb_inds]
+                    
+                    # Get CLIP embeddings (build fresh graph each minibatch)
+                    if args.clip_config.clip_modality == "text":
+                        mb_clip_embeddings = clip_embeddings[mb_inds]
+                    elif args.clip_config.clip_modality == "image":
+                        # Apply projection per minibatch to avoid retain_graph
+                        mb_clip_embeddings = agent.temporal_projection(clip_embeddings_concat[mb_inds])
                     
                     # Compute cosine embedding loss
                     clip_loss = clip_ppo_utils.compute_cosine_embedding_loss(ppo_latents, mb_clip_embeddings)
@@ -713,8 +781,9 @@ if __name__ == "__main__":
 
     # Save final model
     if args.save_model:
+        extra_models = {'temporal_projection': agent.temporal_projection} if agent.temporal_projection else None
         checkpoint_utils.save_checkpoint(agent, optimizer, args.num_iterations, global_step, args, checkpoint_path, 
-                       b_returns if 'b_returns' in locals() else None, final=True)
+                       b_returns if 'b_returns' in locals() else None, final=True, extra_models=extra_models)
 
     envs.close()
     writer.close()

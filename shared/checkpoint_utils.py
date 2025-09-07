@@ -14,7 +14,8 @@ def save_checkpoint(
     args: dataclass,
     checkpoint_path: str,
     b_returns: Optional[torch.Tensor] = None,
-    final: bool = False
+    final: bool = False,
+    extra_models: Optional[dict] = None
 ) -> None:
     """Save model checkpoint"""
     checkpoint = {
@@ -26,6 +27,12 @@ def save_checkpoint(
         'returns': b_returns.cpu().numpy() if b_returns is not None else None,
         'training_complete': final
     }
+    
+    # Save extra models if provided
+    if extra_models:
+        for name, model in extra_models.items():
+            if model is not None:
+                checkpoint[f'{name}_state_dict'] = model.state_dict()
     
     if final:
         filename = f"{checkpoint_path}_final.pt"
@@ -43,7 +50,8 @@ def load_checkpoint(
     checkpoint_path: str,
     agent: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
-    device: torch.device
+    device: torch.device,
+    extra_models: Optional[dict] = None
 ) -> tuple:
     """Load model checkpoint and return iteration, global_step"""
     print(f"Loading checkpoint from {checkpoint_path}")
@@ -55,6 +63,12 @@ def load_checkpoint(
     # Load model and optimizer states
     agent.load_state_dict(checkpoint['agent_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Load extra models if provided
+    if extra_models:
+        for name, model in extra_models.items():
+            if model is not None and f'{name}_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint[f'{name}_state_dict'])
     
     iteration = checkpoint['iteration']
     global_step = checkpoint['global_step']
