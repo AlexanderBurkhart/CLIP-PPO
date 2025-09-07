@@ -608,6 +608,7 @@ if __name__ == "__main__":
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
         clipfracs = []
+        minibatch_counter = 0
         for epoch in range(args.update_epochs):
             np.random.shuffle(b_inds)
             for start in range(0, args.batch_size, args.minibatch_size):
@@ -650,9 +651,10 @@ if __name__ == "__main__":
 
                 entropy_loss = entropy.mean()
                 
-                # CLIP-PPO: Compute alignment loss
+                # CLIP-PPO: Compute alignment loss (applied every _SKIP_LENGTH_CLIP_LOSS minibatch)
                 clip_loss = torch.tensor(0.0, device=device)
-                if clip_ppo_utils.should_compute_clip_loss(args.clip_config.ablation_mode, args.clip_config.clip_lambda):
+                if (clip_ppo_utils.should_compute_clip_loss(args.clip_config.ablation_mode, args.clip_config.clip_lambda) 
+                    and minibatch_counter % clip_ppo_utils.CLIP_LOSS_FREQUENCY == 0):
                     # Get PPO latent representations
                     ppo_latents = agent.get_latent_representation(b_obs[mb_inds])
                     mb_clip_embeddings = clip_embeddings[mb_inds]
@@ -675,6 +677,8 @@ if __name__ == "__main__":
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
+                
+                minibatch_counter += 1
 
             if args.target_kl is not None and approx_kl > args.target_kl:
                 break

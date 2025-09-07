@@ -30,10 +30,10 @@ class ComparisonConfig:
     # AlgorithmConfig('PPO', 'runs/old/ppo_clean', ['runs/old/ppo_hard']),
     # AlgorithmConfig('CLIP_PPO', 'runs/old/clip_ppo_clean', ['runs/old/clip_ppo_hard']),
     algorithms: tuple = (
-        AlgorithmConfig('PPO', 'runs/ppo_clean', ['runs/ppo_hard']),
-        AlgorithmConfig('CLIP_PPO', 'runs/clip_ppo_clean', ['runs/clip_ppo_hard']),
-        AlgorithmConfig('FROZEN', 'runs/clip_ppo_frozen_clip_clean', ['runs/clip_ppo_frozen_clip_hard']),
-        AlgorithmConfig('RANDOM', 'runs/clip_ppo_random_encoder_clean', ['runs/clip_ppo_random_encoder_hard'])
+        AlgorithmConfig('PPO', 'runs/ppo_l0.0_NONE_MiniGrid-FourRooms-v0_s42', ['runs/ppo_l0.0_HARD_MiniGrid-FourRooms-v0_s42']),
+        AlgorithmConfig('CLIP_PPO', 'runs/clip_ppo_l1e-05_NONE_MiniGrid-FourRooms-v0_s42', ['runs/clip_ppo_hard']),
+        # AlgorithmConfig('FROZEN', 'runs/clip_ppo_frozen_clip_clean', ['runs/clip_ppo_frozen_clip_hard']),
+        # AlgorithmConfig('RANDOM', 'runs/clip_ppo_random_encoder_clean', ['runs/clip_ppo_random_encoder_hard'])
     )
     """List of algorithm configurations"""
 
