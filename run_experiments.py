@@ -105,7 +105,6 @@ def _setup_main_experiments():
         'MiniGrid-FourRooms-v0',  # Medium
         'MiniGrid-DoorKey-16x16-v0',  # Hard
     ]
-    # 16, 
     for seed in seeds:
         for env_id in minigrid_environments:
             # PPO
@@ -235,7 +234,7 @@ def _setup_main_experiments():
             experiments.append(
                 ExperimentConfig(
                     name=f"{atari_environment} PPO CLEAN",
-                    run_name=f"{atari_environment}_PPO_CLEAN_{env_id}_s{seed}",
+                    run_name=f"{atari_environment}_PPO_CLEAN_{env_id.replace('/', '')}_s{seed}",
                     seed=seed,
                     ablation_mode=clip_ppo_utils.AblationMode.NONE,
                     clip_lambda=0.0,
@@ -251,7 +250,7 @@ def _setup_main_experiments():
             experiments.append(
                 ExperimentConfig(
                     name=f"{atari_environment} PPO FROZEN CLIP CLEAN",
-                    run_name=f"{atari_environment}_PPOFROZENCLIP_CLEAN_{env_id}_s{seed}",
+                    run_name=f"{atari_environment}_PPOFROZENCLIP_CLEAN_{env_id.replace('/', '')}_s{seed}",
                     seed=seed,
                     ablation_mode=clip_ppo_utils.AblationMode.FROZEN_CLIP,
                     clip_lambda=0.0,
