@@ -97,9 +97,12 @@ def _setup_main_experiments():
     )
     severities = (
         disturbances.DisturbanceSeverity.NONE,
-        disturbances.DisturbanceSeverity.MILD,
         disturbances.DisturbanceSeverity.MODERATE,
         disturbances.DisturbanceSeverity.SEVERE,
+    )
+    ablations = (
+        clip_ppo_utils.AblationMode.FROZEN_CLIP,
+        clip_ppo_utils.AblationMode.NONE,
     )
     environments = {
         'minigrid': [
@@ -107,29 +110,25 @@ def _setup_main_experiments():
             'MiniGrid-FourRooms-v0',  # Medium
             'MiniGrid-DoorKey-16x16-v0',  # Hard
         ],
-        'atari': [
-            'ALE/Breakout-v5',  # Easy
-            'ALE/Pong-v5',  # Easy
-        ]
     }
     timesteps = {
         'minigrid': 5_000_000,
-        'atari': 10_000_000,
+        'atari': 100_000
     }
     for environment_type, env_list in environments.items():
         for env_id in env_list:
-            for combo in itertools.product(seeds, lambdas, severities):
-                seed, lambda_val, severity = combo
+            for combo in itertools.product(seeds, lambdas, severities, ablations):
+                seed, lambda_val, severity, ablation = combo
                 
                 # Generate run name
                 algo_name = "ppo" if lambda_val == 0.0 else "clip_ppo"
-                run_name = f"{algo_name}_l{lambda_val}_{severity.value}_{env_id.replace('/','')}_s{seed}"
+                run_name = f"{algo_name}_ablation{ablation}_l{lambda_val}_{severity.value}_{env_id.replace('/','')}_s{seed}"
                 
                 experiments.append(ExperimentConfig(
                     name=f"{environment_type.title()} {algo_name} λ={lambda_val} {severity.value} {env_id} seed={seed}",
                     run_name=run_name,
                     seed=seed,
-                    ablation_mode=clip_ppo_utils.AblationMode.NONE,
+                    ablation_mode=ablation,
                     clip_lambda=lambda_val,
                     apply_disturbances=(severity != disturbances.DisturbanceSeverity.NONE),
                     disturbance_severity=severity,
@@ -140,44 +139,36 @@ def _setup_main_experiments():
                 ))
 
     """
-    ABLATION GENERATIONS
+    ATARI GENERATIONS
     """
-    ablation_seeds = (0, 42)
-    ablations = (
-        clip_ppo_utils.AblationMode.FROZEN_CLIP,
-        clip_ppo_utils.AblationMode.RANDOM_ENCODER,
-    )
-    best_lambda = 0.00001  # Use best lambda found from sweep
-    
     # Reduced environments for ablations - just need representative examples
-    ablation_environments = {
-        'minigrid': [
-            'MiniGrid-FourRooms-v0',  # Medium complexity, good for ablations
-        ],
+    atari_environments = {
         'atari': [
-            'ALE/Breakout-v5',  # Most common benchmark
+            'ALE/Breakout-v5',
+            'ALE/Pong-v5',
+            'ALE/Seaquest-v5'  # Most common benchmark
         ]
     }
     
-    for environment_type, env_list in ablation_environments.items():
+    for environment_type, env_list in atari_environments.items():
         for env_id in env_list:
             for ablation_mode in ablations:
-                for combo in itertools.product(ablation_seeds, severities):
+                for combo in itertools.product(seeds, severities):
                     seed, severity = combo
                     
                     # Generate run name
                     ablation_name = ablation_mode.value
-                    run_name = f"clip_ppo_{ablation_name}_l{best_lambda}_{severity.value}_{env_id.replace('/','')}_s{seed}"
+                    run_name = f"atari_ppo_ablation{ablation_name}_{severity.value}_{env_id.replace('/','')}_s{seed}"
                     
                     experiments.append(ExperimentConfig(
-                        name=f"{environment_type.title()} {ablation_name.replace('_', ' ').title()} λ={best_lambda} {severity.value} {env_id} seed={seed}",
+                        name=f"{environment_type.title()} {ablation_name.replace('_', ' ').title()} λ=0.0 {severity.value} {env_id} seed={seed}",
                         run_name=run_name,
                         seed=seed,
                         ablation_mode=ablation_mode,
-                        clip_lambda=best_lambda,
+                        clip_lambda=0.0,
                         apply_disturbances=(severity != disturbances.DisturbanceSeverity.NONE),
                         disturbance_severity=severity,
-                        description=f"{ablation_name.replace('_', ' ')} ablation λ={best_lambda} with {severity.value} disturbances on {env_id}",
+                        description=f"{ablation_name.replace('_', ' ')} ablation λ=0.0 with {severity.value} disturbances on {env_id}",
                         environment=environment_type,
                         env_id=env_id,
                         timesteps=timesteps[environment_type],
@@ -187,108 +178,10 @@ def _setup_main_experiments():
     print(f"Generated {len(experiments)} total experiment combinations")
     return experiments
 
-
-def _setup_temp_experiments():
-    experiments = []
-    # Configurations
-    seeds = (42,)
-    lambdas = (
-        # 0.0,       # PPO Baseline
-        0.00001,   # 1e-5 (best result)
-    )
-    severities = (
-        disturbances.DisturbanceSeverity.NONE,
-        disturbances.DisturbanceSeverity.HARD,
-    )
-    environments = {
-        'minigrid': [
-            # 'MiniGrid-Empty-16x16-v0',  # Easy
-            'MiniGrid-FourRooms-v0',  # Medium
-        #     'MiniGrid-DoorKey-16x16-v0',  # Hard
-        ],
-        # 'atari': [
-            # 'ALE/Breakout-v5',  # Easy
-        #     'ALE/Pong-v5',  # Easy
-        # ]
-    }
-    timesteps = {
-        'minigrid': 750_000,
-        'atari': 250_000,
-    }
-    for environment_type, env_list in environments.items():
-        for env_id in env_list:
-            for combo in itertools.product(seeds, lambdas, severities):
-                seed, lambda_val, severity = combo
-                
-                # Generate run name
-                algo_name = "ppo" if lambda_val == 0.0 else "clip_ppo"
-                run_name = f"{algo_name}_l{lambda_val}_{severity.value}_{env_id.replace('/','')}_s{seed}"
-                
-                experiments.append(ExperimentConfig(
-                    name=f"{environment_type.title()} {algo_name} λ={lambda_val} {severity.value} {env_id} seed={seed}",
-                    run_name=run_name,
-                    seed=seed,
-                    ablation_mode=clip_ppo_utils.AblationMode.NONE,
-                    clip_lambda=lambda_val,
-                    apply_disturbances=(severity != disturbances.DisturbanceSeverity.NONE),
-                    disturbance_severity=severity,
-                    description=f"{algo_name} λ={lambda_val} with {severity.value} disturbances on {env_id}",
-                    environment=environment_type,
-                    env_id=env_id,
-                    timesteps=timesteps[environment_type],
-                ))
-
-    """
-    ABLATION GENERATIONS
-    """
-    ablation_seeds = (42,)
-    ablations = (
-        clip_ppo_utils.AblationMode.FROZEN_CLIP,
-        clip_ppo_utils.AblationMode.RANDOM_ENCODER,
-    )
-    best_lambda = 0.00001  # Use best lambda found from sweep
-    
-    # Reduced environments for ablations - just need representative examples
-    ablation_environments = {
-        'minigrid': [
-            'MiniGrid-FourRooms-v0',  # Medium complexity, good for ablations
-        ],
-        # 'atari': [
-        #     'ALE/Pong-v5',
-        # ]
-    }
-    
-    for environment_type, env_list in ablation_environments.items():
-        for env_id in env_list:
-            for ablation_mode in ablations:
-                for combo in itertools.product(ablation_seeds, severities):
-                    seed, severity = combo
-                    
-                    # Generate run name
-                    ablation_name = ablation_mode.value
-                    run_name = f"clip_ppo_{ablation_name}_l{best_lambda}_{severity.value}_{env_id.replace('/','')}_s{seed}"
-                    
-                    experiments.append(ExperimentConfig(
-                        name=f"{environment_type.title()} {ablation_name.replace('_', ' ').title()} λ={best_lambda} {severity.value} {env_id} seed={seed}",
-                        run_name=run_name,
-                        seed=seed,
-                        ablation_mode=ablation_mode,
-                        clip_lambda=best_lambda,
-                        apply_disturbances=(severity != disturbances.DisturbanceSeverity.NONE),
-                        disturbance_severity=severity,
-                        description=f"{ablation_name.replace('_', ' ')} ablation λ={best_lambda} with {severity.value} disturbances on {env_id}",
-                        environment=environment_type,
-                        env_id=env_id,
-                        timesteps=timesteps[environment_type],
-                    ))
-
-
-    print(f"Generated {len(experiments)} total experiment combinations")
-    return experiments
 
 def main():
     """Run all ablation experiments."""
-    experiments = _setup_temp_experiments()
+    experiments = _setup_main_experiments()
     
     print("Starting CLIP-PPO Experiments")
     print(f"Total experiments: {len(experiments)}")

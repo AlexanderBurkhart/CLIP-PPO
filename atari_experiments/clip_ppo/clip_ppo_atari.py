@@ -221,7 +221,7 @@ class Agent(nn.Module):
     
     def get_latent_representation(self, x):
         """Get latent representation for CLIP alignment."""
-        return self._get_features(x)
+        return self._get_features(x).detach()
 
 
 def convert_atari_frames_for_clip(obs_batch):
@@ -670,8 +670,13 @@ if __name__ == "__main__":
                         print(f"Combined loss: {(pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.clip_config.clip_lambda * clip_loss).item():.6f}")
                         print("---")
 
+                # Apply CLIP lambda warmup
+                current_clip_lambda = clip_ppo_utils.get_clip_lambda_with_warmup(
+                    args.clip_config.clip_lambda, iteration - 1, args.num_iterations
+                )
+
                 # Total loss
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + args.clip_config.clip_lambda * clip_loss
+                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef + current_clip_lambda * clip_loss
 
                 optimizer.zero_grad()
                 loss.backward()

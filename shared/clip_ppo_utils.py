@@ -21,7 +21,29 @@ class AblationMode(Enum):
 _CLIP_MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073])
 _CLIP_STD = torch.tensor([0.26862954, 0.26130258, 0.27577711])
 
-CLIP_LOSS_FREQUENCY = 1
+CLIP_LOSS_FREQUENCY = 4
+
+def get_clip_lambda_with_warmup(target_lambda: float, current_iteration: int, total_iterations: int, warmup_fraction: float = 0.2) -> float:
+    """
+    Get CLIP lambda with linear warmup from 0 to target_lambda over first warmup_fraction of training.
+    
+    Args:
+        target_lambda: Final CLIP lambda value
+        current_iteration: Current training iteration (0-indexed)
+        total_iterations: Total number of training iterations
+        warmup_fraction: Fraction of training to use for warmup (default: 0.2 = 20%)
+        
+    Returns:
+        Current CLIP lambda value
+    """
+    warmup_iterations = int(total_iterations * warmup_fraction)
+    
+    if current_iteration < warmup_iterations:
+        # Linear warmup: 0 -> target_lambda over warmup_iterations
+        return target_lambda * (current_iteration / warmup_iterations)
+    else:
+        # Full target lambda after warmup
+        return target_lambda
 
 def compute_cosine_embedding_loss(z: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
     """

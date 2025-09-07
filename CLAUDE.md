@@ -760,6 +760,41 @@ The Atari implementation now includes all major features and fixes:
 - Configurable environment IDs (`env_id` parameter)
 - Updated with comprehensive Atari experiment configurations
 
+**✅ CLIP Loss Frequency Optimization**
+- Added `CLIP_LOSS_FREQUENCY` parameter in `shared/clip_ppo_utils.py` (default: 1)
+- CLIP alignment loss now computed every Nth minibatch: `minibatch_counter % CLIP_LOSS_FREQUENCY == 0`
+- Reduces computational overhead while maintaining semantic regularization
+- When `CLIP_LOSS_FREQUENCY = 4`: applies CLIP loss to 25% of minibatches (every 4th)
+- When `CLIP_LOSS_FREQUENCY = 1`: applies CLIP loss to every minibatch (no optimization)
+- Implemented in both MiniGrid and Atari CLIP-PPO implementations
+
+**✅ Dynamic Time Estimation System**
+- Added real-time experiment duration tracking in `run_experiments.py`
+- Calculates running average of completed experiment times
+- Displays updated estimates after each experiment:
+  - Average time per experiment (minutes)
+  - Estimated remaining time (hours)
+  - Predicted completion timestamp
+- Helps monitor progress during long experiment runs (320+ experiments)
+- Estimates become more accurate as more experiments complete
+
+**✅ CLIP Lambda Warmup Schedule**
+- Added `get_clip_lambda_with_warmup()` function in `shared/clip_ppo_utils.py`
+- Linear warmup from λ=0 to target λ over first 20% of training (configurable)
+- Improves training stability by starting with pure PPO before introducing semantic regularization
+- Prevents early policy instability from CLIP alignment conflicts
+- Implemented in both MiniGrid and Atari CLIP-PPO implementations
+- Handles 1-indexed to 0-indexed iteration conversion automatically
+
+**✅ Experimental Design Optimization**
+- **Atari timesteps**: Updated to 100,000 (Atari-100k benchmark standard) from 10M
+- **Severity levels**: Reduced to NONE, MODERATE, SEVERE (3 levels) for focused comparison
+- **Lambda sweep**: Refined to [0.0, 1e-6, 1e-5, 1e-4] based on loss magnitude analysis
+- **Ablation strategy**: 
+  - MiniGrid: Full factorial (comprehensive analysis)
+  - Atari: Focused ablation (frozen encoder validation only)
+- **Environment selection**: 3 environments per domain for balanced coverage vs compute cost
+
 ### Technical Implementation Details
 
 **Agent Architecture Updates:**
