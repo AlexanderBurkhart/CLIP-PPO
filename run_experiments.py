@@ -87,8 +87,8 @@ def _setup_main_experiments():
     
     seeds = (0, 42)
     timesteps = {
-        'minigrid': 1000,#5_000_000,
-        'atari': 1000#100_000
+        'minigrid': 5_000_000,
+        'atari': 100_000,
     }
 
     """
