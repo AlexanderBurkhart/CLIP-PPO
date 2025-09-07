@@ -47,7 +47,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = 'MiniGrid-Empty-16x16-v0'
     """the id of the environment"""
-    total_timesteps: int = 100_000
+    total_timesteps: int = 5_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
